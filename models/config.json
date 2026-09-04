@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "version": "ai4i-calibrated-v3",
+  "selected_model": "logistic_sigmoid_calibrated",
+  "threshold": 0.1824258916679845,
+  "false_negative_cost": 5.0,
+  "false_positive_cost": 1.0,
+  "seed": 42,
+  "features": [
+    "Type",
+    "Air temperature",
+    "Process temperature",
+    "Rotational speed",
+    "Torque",
+    "Tool wear",
+    "temperature_delta",
+    "power_proxy",
+    "strain_proxy"
+  ],
+  "split_contract": {
+    "method": "stratified_random",
+    "train_fraction": 0.64,
+    "validation_fraction": 0.16,
+    "test_fraction": 0.2,
+    "limitation": "Dataset không có chuỗi thời gian/machine history đủ để group-time split."
+  },
+  "runtime": {
+    "python": "3.13.14",
+    "scikit_learn": "1.9.0",
+    "numpy": "2.5.2",
+    "joblib": "1.5.3"
+  }
+}

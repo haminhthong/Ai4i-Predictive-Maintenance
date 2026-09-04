@@ -1,0 +1,22 @@
+{
+  "model_version": "ai4i-calibrated-v3",
+  "selected_model": "logistic_sigmoid_calibrated",
+  "threshold": 0.1824258916679845,
+  "pr_auc": 0.43789368966267295,
+  "roc_auc": 0.9349043965412253,
+  "precision": 0.425,
+  "recall": 0.5,
+  "f1": 0.4594594594594595,
+  "brier": 0.02454237268456818,
+  "alert_rate": 0.04,
+  "confusion_matrix": [
+    [
+      1886,
+      46
+    ],
+    [
+      34,
+      34
+    ]
+  ]
+}
