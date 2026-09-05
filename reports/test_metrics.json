@@ -1,22 +1,139 @@
 {
-  "model_version": "ai4i-calibrated-v3",
-  "selected_model": "logistic_sigmoid_calibrated",
-  "threshold": 0.1824258916679845,
-  "pr_auc": 0.43789368966267295,
-  "roc_auc": 0.9349043965412253,
-  "precision": 0.425,
-  "recall": 0.5,
-  "f1": 0.4594594594594595,
-  "brier": 0.02454237268456818,
-  "alert_rate": 0.04,
+  "model_version": "ai4i-20260905-9b01f38",
+  "feature_contract_version": "ai4i-features-v2",
+  "selected_model": "rf_sigmoid_calibrated",
+  "threshold": 0.3574360713649883,
+  "pr_auc": 0.8665688638646937,
+  "roc_auc": 0.9710944160272805,
+  "precision": 0.8888888888888888,
+  "recall": 0.8235294117647058,
+  "f1": 0.8549618320610687,
+  "brier": 0.008355930974627541,
+  "ece": 0.0036944851908138673,
+  "alert_rate": 0.0315,
+  "expected_business_cost": 67.0,
+  "cost_per_1000_machines": 33.5,
   "confusion_matrix": [
     [
-      1886,
-      46
+      1925,
+      7
     ],
     [
-      34,
-      34
+      12,
+      56
     ]
+  ],
+  "threshold_ablation_study": {
+    "fixed_0_50": {
+      "threshold": 0.5,
+      "precision": 0.9473684210526315,
+      "recall": 0.7941176470588235,
+      "f1": 0.864,
+      "alert_rate": 0.0285,
+      "false_negatives": 14,
+      "false_positives": 3,
+      "true_positives": 54,
+      "true_negatives": 1929,
+      "expected_cost": 73.0,
+      "cost_per_1000_machines": 36.5
+    },
+    "max_f1_strategy": {
+      "threshold": 0.39650643865612695,
+      "precision": 0.9180327868852459,
+      "recall": 0.8235294117647058,
+      "f1": 0.8682170542635659,
+      "alert_rate": 0.0305,
+      "false_negatives": 12,
+      "false_positives": 5,
+      "true_positives": 56,
+      "true_negatives": 1927,
+      "expected_cost": 65.0,
+      "cost_per_1000_machines": 32.5
+    },
+    "cost_sensitive_tuned": {
+      "threshold": 0.3574360713649883,
+      "precision": 0.8888888888888888,
+      "recall": 0.8235294117647058,
+      "f1": 0.8549618320610687,
+      "alert_rate": 0.0315,
+      "false_negatives": 12,
+      "false_positives": 7,
+      "true_positives": 56,
+      "true_negatives": 1925,
+      "expected_cost": 67.0,
+      "cost_per_1000_machines": 33.5
+    }
+  },
+  "calibration_curve": [
+    {
+      "bin_lower": 0.0,
+      "bin_upper": 0.1,
+      "count": 1913,
+      "mean_predicted": 0.00562349712750312,
+      "fraction_of_positives": 0.004704652378463147
+    },
+    {
+      "bin_lower": 0.1,
+      "bin_upper": 0.2,
+      "count": 14,
+      "mean_predicted": 0.1342914723245974,
+      "fraction_of_positives": 0.14285714285714285
+    },
+    {
+      "bin_lower": 0.2,
+      "bin_upper": 0.30000000000000004,
+      "count": 7,
+      "mean_predicted": 0.2433014552186383,
+      "fraction_of_positives": 0.14285714285714285
+    },
+    {
+      "bin_lower": 0.30000000000000004,
+      "bin_upper": 0.4,
+      "count": 6,
+      "mean_predicted": 0.35393470347891015,
+      "fraction_of_positives": 0.16666666666666666
+    },
+    {
+      "bin_lower": 0.4,
+      "bin_upper": 0.5,
+      "count": 3,
+      "mean_predicted": 0.4349157313748981,
+      "fraction_of_positives": 0.3333333333333333
+    },
+    {
+      "bin_lower": 0.5,
+      "bin_upper": 0.6000000000000001,
+      "count": 3,
+      "mean_predicted": 0.5519903673572927,
+      "fraction_of_positives": 1.0
+    },
+    {
+      "bin_lower": 0.6000000000000001,
+      "bin_upper": 0.7000000000000001,
+      "count": 4,
+      "mean_predicted": 0.6303561109635741,
+      "fraction_of_positives": 0.75
+    },
+    {
+      "bin_lower": 0.7000000000000001,
+      "bin_upper": 0.8,
+      "count": 3,
+      "mean_predicted": 0.7504276585654618,
+      "fraction_of_positives": 1.0
+    },
+    {
+      "bin_lower": 0.8,
+      "bin_upper": 0.9,
+      "count": 10,
+      "mean_predicted": 0.8701986694829603,
+      "fraction_of_positives": 0.9
+    },
+    {
+      "bin_lower": 0.9,
+      "bin_upper": 1.0,
+      "count": 37,
+      "mean_predicted": 0.9591756593464279,
+      "fraction_of_positives": 0.972972972972973
+    }
   ]
 }

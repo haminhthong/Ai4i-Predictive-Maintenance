@@ -1,4 +1,4 @@
-# ⚙️ Predictive Maintenance AI Service (AI4I 2020 Dataset)
+# ⚙️ Machine Failure Risk & Maintenance Decision System
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-2.0-green.svg)](https://fastapi.tiangolo.com/)
@@ -6,211 +6,129 @@
 [![Scikit-Learn](https://img.shields.io/badge/Scikit--Learn-ML-orange.svg)](https://scikit-learn.org/)
 [![Docker](https://img.shields.io/badge/Docker-Supported-blue)](https://www.docker.com/)
 
-Hệ thống AI dự báo rủi ro hỏng hóc máy móc sản xuất thời gian thực, tự động tối ưu hóa ngưỡng cảnh báo bảo trì dựa trên ma trận chi phí nghiệp vụ và cung cấp giao diện Dashboard minh bạch kèm mã lý do vận hành (Reason Codes).
+> **Predictive Maintenance Risk Decision Platform**: A leakage-safe machine-failure risk scoring system with calibrated probabilities, cost-sensitive maintenance decisions, operational reason codes, and production-oriented serving.
 
 ---
 
-## 📌 1. Tổng quan Dự án
+## 📌 1. Positioning & Core Problem Statement
 
 Trong các nhà máy sản xuất công nghiệp, sự cố máy móc hỏng hóc đột ngột (**Unplanned Downtime**) gây ra thiệt hại kinh tế rất lớn. Tuy nhiên, việc dừng máy kiểm tra quá thường xuyên (**Over-maintenance**) cũng làm gia tăng chi phí nhân công và gián đoạn dây chuyền.
 
-Dự án này xây dựng một giải pháp **Predictive Maintenance (Bảo trì Dự báo)** toàn diện dựa trên bộ dữ liệu **AI4I 2020 Predictive Maintenance Dataset** (từ UCI Machine Learning Repository), giúp:
-1. **Dự báo xác suất hỏng hóc** của thiết bị từ dữ liệu cảm biến thời gian thực.
-2. **Hiệu chỉnh xác suất (Probability Calibration)** để xác suất dự báo phản ánh đúng tần suất rủi ro thực tế.
-3. **Tối ưu ngưỡng quyết định (Cost-Sensitive Threshold Tuning)** dựa trên giả định chi phí nghiệp vụ thực tế: **Chi phí bỏ sót 1 máy hỏng (False Negative) cao gấp 5 lần chi phí kiểm tra nhầm (False Positive)**.
-4. **Phân cấp rủi ro (Risk Tiering)** thành 3 mức: `HIGH`, `MEDIUM`, `LOW`.
-5. **Cung cấp mã lý do vận hành (Operational Reason Codes)** giúp kỹ sư vận hành hiểu rõ nguyên nhân gây ra rủi ro.
+### 🔴 Phân định Bài toán (Problem Definition)
+* **Bài toán thực tế hiện tại**: Đây là hệ thống **Phân loại Rủi ro Sự cố Máy móc từ Ảnh chụp Trạng thái Cảm biến (Snapshot Machine-Failure Risk Classification)** tại thời điểm suy luận (Inference time).
+* **Điều không overclaim**: Do bộ dữ liệu AI4I 2020 không chứa chuỗi dữ liệu thời gian (Time-series machine trajectory / history), hệ thống **không overclaim** làm dự báo thời gian sử dụng còn lại (**Remaining Useful Life - RUL**) hay dự báo hỏng hóc trước $N$ giờ.
+* **Thời gian thực (Real-time Serving)**: Hệ thống phục vụ suy luận thời gian thực qua REST API / Dashboard cho từng điểm dữ liệu cảm biến thu thập từ máy.
 
 ---
 
-## 🏗️ 2. Kiến trúc & ML Pipeline
+## 🏗️ 2. Canonical 7-Stage Pipeline Architecture
 
+Hệ thống được thiết kế và vận hành theo **Canonical 7-Stage Pipeline** duy nhất thống nhất từ mã nguồn, thử nghiệm đến phục vụ thực tế:
+
+```text
+1. DATA INGESTION
+   AI4I 2020 Sensor Observations
+        ↓
+2. ANTI-LEAKAGE & FEATURE ENGINEERING
+   Drop: Target (Machine failure), Failure Flags (TWF/HDF/PWF/OSF/RNF), IDs (UDI, Product ID)
+   Engineer: temperature_delta, mechanical_power (Watts), wear_load_interaction
+        ↓
+3. DATA PARTITION
+   Stratified Random Split (Train 64% / Validation 16% / Test 20%)
+        ↓
+4. MODEL DEVELOPMENT & CALIBRATION
+   Benchmark Model Zoo (Logistic Regression, Random Forest, HistGradientBoosting)
+   Evaluate Raw vs. Sigmoid Calibrated (PR-AUC & Brier Score Trade-off) -> Dynamic Champion Selection
+        ↓
+5. DECISION OPTIMIZATION
+   Validation Probabilities + Business Cost Matrix (FN=5x, FP=1x) + Maintenance Capacity Sweep
+        ↓
+6. FINAL TEST EVALUATION
+   Untouched Test Set: PR-AUC, ROC-AUC, Precision, Recall, F1, Brier, ECE, Alert Rate, Confusion Matrix
+   Test Expected Business Cost & Threshold Strategy Ablation Study
+        ↓
+7. SERVING & API
+   Sensor Request -> Shared Preprocessing -> Failure Risk Score + Model Explanation
+   -> Decision Policy (Alert / Risk Tier) + Operational Reason Codes -> FastAPI / Streamlit UI
 ```
-┌─────────────────┐    ┌─────────────────────────┐    ┌──────────────────────────┐
-│   UCI Dataset   │ ──►│ Anti-Leakage & Features │ ──►│ Sigmoid Calibration      │
-│  (AI4I 2020)    │    │ (Delta, Power, Strain)  │    │ Logistic Regression      │
-└─────────────────┘    └─────────────────────────┘    └──────────────────────────┘
-                                                                   │
-                                                                   ▼
-┌─────────────────┐    ┌─────────────────────────┐    ┌──────────────────────────┐
-│ Streamlit UI    │ ◄──│ FastAPI Service         │ ◄──│ Cost-Tuned Threshold     │
-│ & Reason Codes  │    │ /predict-risk & /health │    │ (FN=5x, FP=1x)           │
-└─────────────────┘    └─────────────────────────┘    └──────────────────────────┘
-```
 
-### 2.1 Phòng chống Rò rỉ Dữ liệu (Data Leakage)
-Dataset AI4I chứa các cột nguyên nhân hỏng hóc như `TWF`, `HDF`, `PWF`, `OSF`, `RNF`. Các cột này là nhãn hậu nghiệm (chỉ biết sau khi máy đã hỏng). Pipeline tự động **loại bỏ 100% các cột này** và các thuộc tính ID (`UDI`, `Product ID`) khỏi quá trình huấn luyện để đảm bảo tính thực tế khi triển khai.
+---
 
-### 2.2 Kỹ thuật Đặc trưng Vật lý (Feature Engineering)
-Dựa trên tri thức miền (Domain Knowledge), pipeline tính toán 3 đặc trưng vật lý bổ sung:
-* **`temperature_delta`** $= T_{\text{process}} - T_{\text{air}}$ (K): Độ chênh lệch nhiệt độ giữa vận hành và không khí, phản ánh mức độ tích nhiệt ma sát.
-* **`power_proxy`** $= \text{Rotational Speed} \times \text{Torque}$ (RPM·Nm): Công suất cơ học xấp xỉ của thiết bị.
-* **`strain_proxy`** $= \text{Tool Wear} \times \text{Torque}$ (min·Nm): Tải trọng lực tích lũy tác động lên công cụ theo thời gian.
+## 🛡️ 3. Anti-Leakage Design & Feature Engineering
 
-### 2.3 Mô hình hóa & Hiệu chỉnh Xác suất
-* **Baseline**: Logistic Regression với `class_weight='balanced'`.
-* **Calibrated Model**: Sigmoid Calibrated Classifier (`CalibratedClassifierCV` với 3-fold Cross Validation).
-* **Tiêu chuẩn lựa chọn**: Mô hình được chọn dựa trên **PR-AUC** tối ưu và **Brier Score** thấp nhất trên tập Validation.
+### 3.1 Phòng chống Rò rỉ Dữ liệu (Anti-Leakage Architecture)
 
-### 2.4 Tối ưu Ngưỡng Quyết định theo Chi phí (Cost-Sensitive Tuning)
-Hệ thống không sử dụng ngưỡng mặc định 0.5. Ngưỡng cảnh báo tối ưu ($\theta^*$) được quét trên tập Validation để tối thiểu hóa hàm tổng chi phí nghiệp vụ:
+> [!IMPORTANT]
+> **Key Strength**: *The model predicts machine-failure risk using ONLY information available at inference time.*
+
+Dataset AI4I 2020 chứa các cột nguyên nhân hỏng hóc bao gồm: `TWF` (Tool Wear Failure), `HDF` (Heat Dissipation Failure), `PWF` (Power Failure), `OSF` (Overstrain Failure), `RNF` (Random Failure). 
+Các cột này là **thông tin hậu nghiệm** (chỉ biết sau khi máy đã thực sự xảy ra sự cố). Nếu đưa các biến này vào huấn luyện, mô hình sẽ bị rò rỉ dữ liệu (Data Leakage) nghiêm trọng. Pipeline tự động **loại bỏ 100% các cột này** cùng thuộc tính định danh (`UDI`, `Product ID`) trước khi chia tập dữ liệu.
+
+### 3.2 Kỹ thuật Đặc trưng Vật lý (Physics-Based Feature Engineering)
+
+Dựa trên nguyên lý cơ học & nhiệt động lực học trong sản xuất:
+1. **`temperature_delta`** $= T_{\text{process}} - T_{\text{air}}$ (Kelvin K): Độ chênh lệch nhiệt độ giữa quá trình vận hành và không khí xung quanh, đại diện cho nhiệt ma sát tích tụ.
+2. **`mechanical_power`** $= \tau \cdot \omega = \text{Torque} \times \left(\text{RPM} \times \frac{2\pi}{60}\right)$ (Watts): Công suất cơ học thực tế của trục máy tính theo đơn vị công suất chuẩn.
+3. **`wear_load_interaction`** $= \text{Tool Wear} \times \text{Torque}$ (min·Nm): Tải trọng lực tương tác tích lũy tác động lên công cụ theo thời gian.
+
+---
+
+## 🔬 4. Model Benchmark & Dynamic Champion Selection
+
+Hệ thống đánh giá đa mô hình (Model Zoo) gồm Logistic Regression, Random Forest và HistGradientBoosting (cả dạng thô và hiệu chỉnh xác suất `CalibratedClassifierCV` bằng phương pháp Sigmoid Calibration):
+
+### Kết quả Validation Leaderboard
+
+| Model Candidate | Validation PR-AUC | Validation Brier Score | Trạng thái |
+| :--- | :---: | :---: | :---: |
+| Logistic Baseline | `0.4679` | `0.1136` | Candidate |
+| Logistic Sigmoid Calibrated | `0.4759` | `0.0232` | Candidate |
+| Random Forest Baseline | `0.8469` | `0.0111` | Candidate |
+| **RF Sigmoid Calibrated** | **`0.8613`** | **`0.0092`** | 🏆 **Selected Champion** |
+| HistGB Baseline | `0.8356` | `0.0105` | Candidate |
+| HistGB Sigmoid Calibrated | `0.8527` | `0.0098` | Candidate |
+
+> [!NOTE]
+> **Dynamic Champion Selection**: Mô hình Champion không cố định cứng trong mã nguồn mà được lựa chọn tự động dựa trên **PR-AUC tối ưu nhất**; nếu mức chênh lệch PR-AUC $\le 0.01$, mô hình có **Brier Score thấp nhất** (xác suất chuẩn xác nhất) sẽ được chọn.
+
+---
+
+## 💰 5. Cost-Sensitive Threshold Optimization & Test Ablation
+
+### 5.1 Tối ưu Ngưỡng Quyết định theo Chi phí Kinh doanh
+Hệ thống không dùng ngưỡng cố định `0.5`. Ngưỡng cảnh báo tối ưu ($\theta^*$) được tìm trên tập Validation bằng cách tối thiểu hóa tổng chi phí nghiệp vụ với kịch bản minh họa:
 
 $$\text{Total Cost} = (\text{FN} \times C_{\text{FN}}) + (\text{FP} \times C_{\text{FP}})$$
 
-Với $C_{\text{FN}} = 5.0$ và $C_{\text{FP}} = 1.0$.
+với chi phí bỏ sót 1 máy hỏng ($C_{\text{FN}} = 5.0$) và chi phí kiểm tra nhầm ($C_{\text{FP}} = 1.0$).
+
+### 5.2 Bảng Đánh giá Ablation Study trên Tập Test Độc lập (2,000 mẫu)
+
+Bảng so sánh 3 chiến lược threshold trên tập Hold-out Test chưa từng thấy:
+
+| Threshold Strategy | Threshold ($\theta$) | Precision | Recall | Alert Rate | Test Expected Cost | Cost / 1,000 Machines |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Fixed Threshold 0.50** | `0.5000` | `94.74%` | `79.41%` | `2.85%` | `$73.00` | `$36.50` |
+| **Max F1 Strategy** | `0.3965` | `91.80%` | `82.35%` | `3.05%` | `$65.00` | `$32.50` |
+| **Cost-Sensitive Tuned ($\theta^*$)** | **`0.3574`** | **`88.89%`** | **`82.35%`** | **`3.15%`** | **`$67.00`** | **`$33.50`** |
+
+* **Brier Score trên Test**: `0.0084`
+* **Expected Calibration Error (ECE)**: `0.0037` (0.37%)
+* **Confusion Matrix [[TN, FP], [FN, TP]]**: `[[1925, 7], [12, 56]]`
 
 ---
 
-## 📁 3. Cấu trúc Thư mục Dự án
+## 🔌 6. RESTful API & Dashboard Interface
 
-```text
-Predictive-Maintenance-Ai4i/
-├── .dockerignore
-├── .env.example
-├── .gitattributes
-├── .gitignore
-├── Dockerfile                  # Cấu hình containerization sản xuất
-├── Makefile                    # Phím tắt các lệnh vận hành hệ thống
-├── README.md                   # Tài liệu hướng dẫn chi tiết dự án
-├── RESEARCH_REPORT.md          # Báo cáo nghiên cứu chuyên sâu về bài toán
-├── app.py                      # Dashboard giao diện người dùng Streamlit
-├── pytest.ini                  # Cấu hình kiểm thử tự động Pytest
-├── requirements.txt            # Danh sách thư viện phụ thuộc Python
-├── data/                       # Thư mục chứa dữ liệu
-│   ├── raw/                    # Dữ liệu thô AI4I 2020 (ai4i2020.csv)
-│   └── processed/              # Dữ liệu qua xử lý
-├── models/                     # Thư mục lưu trữ mô hình & cấu hình
-│   ├── config.json             # Metadata cấu hình phiên bản & threshold
-│   └── model.joblib            # Artifact mô hình đã huấn luyện (.joblib)
-├── reports/                    # Báo cáo đánh giá mô hình
-│   ├── test_metrics.json       # Kết quả kiểm thử độc lập trên tập Test
-│   └── validation_metrics.json # Báo cáo chi tiết trên tập Validation
-├── scripts/                    # Scripts tiện ích
-│   └── download_data.py        # Script tải dữ liệu từ UCI ML Repo
-├── src/                        # Mã nguồn cốt lõi (Source Code)
-│   ├── __init__.py
-│   ├── api.py                  # Dịch vụ FastAPI RESTful Endpoints
-│   ├── data.py                 # Pipeline xử lý dữ liệu & feature engineering
-│   ├── evaluate.py             # Đánh giá độc lập mô hình trên tập Test
-│   ├── train.py                # Huấn luyện mô hình & tối ưu threshold
-│   └── utils.py                # Utilities (logging, set seed, JSON IO)
-└── tests/                      # Bộ test tự động (Test Suite)
-    ├── __init__.py
-    └── test_smoke.py           # Smoke tests & API integration tests
-```
+Hệ thống phục vụ qua **FastAPI RESTful Service** và giao diện **Streamlit Interactive Dashboard**:
 
----
+### 6.1 Endpoints Specification
 
-## 🚀 4. Hướng dẫn Cài đặt & Vận hành
+* `GET /health/live`: Liveness probe.
+* `GET /health/ready`: Readiness probe (kiểm tra mô hình, tệp config, feature contract version).
+* `POST /predict-risk`: Suy luận rủi ro, phân cấp rủi ro (`HIGH`, `MEDIUM`, `LOW`), kiểm tra OOD (Out-Of-Distribution) và trả về phản hồi cấu trúc:
 
-### Yêu cầu Tiên quyết
-* **Python**: `3.11` trở lên
-* **Git** & **Pip**
-
-### Bước 1: Cài đặt Môi trường & Thư viện
-```bash
-# Tạo môi trường ảo (khuyên dùng)
-python -m venv venv
-
-# Kích hoạt môi trường (Windows)
-.\venv\Scripts\activate
-# Hoặc trên Linux/macOS: source venv/bin/activate
-
-# Cài đặt các thư viện phụ thuộc
-pip install -r requirements.txt
-# Hoặc sử dụng Makefile:
-make setup
-```
-
-### Bước 2: Tải Bộ dữ liệu AI4I 2020
-Tải bộ dữ liệu thô tự động từ UCI ML Repository về thư mục `data/raw/`:
-```bash
-make download
-# Hoặc lệnh trực tiếp: python scripts/download_data.py
-```
-
-### Bước 3: Huấn luyện Mô hình & Tối ưu Ngưỡng
-Huấn luyện Logistic Regression baseline và Sigmoid Calibrated Classifier, tìm ngưỡng chi phí tối ưu và lưu artifact tại `models/`:
-```bash
-make train
-# Hoặc lệnh trực tiếp: python -m src.train
-```
-
-### Bước 4: Đánh giá Mô hình trên Tập Test Độc lập
-Chạy đánh giá độc lập mô hình đã lưu trên tập Test (20% hold-out test set chưa từng thấy):
-```bash
-make evaluate
-# Hoặc lệnh trực tiếp: python -m src.evaluate
-```
-
-### Bước 5: Khởi chạy RESTful API Service (FastAPI)
-Khởi chạy dịch vụ API suy luận rủi ro thời gian thực:
-```bash
-make serve
-# Hoặc lệnh trực tiếp: python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
-```
-* **Swagger UI Documentation**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-* **ReDoc Documentation**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
-
-### Bước 6: Khởi chạy Dashboard Trực quan (Streamlit)
-Mở giao diện tương tác trực quan cho kỹ sư vận hành nhà máy:
-```bash
-make dashboard
-# Hoặc lệnh trực tiếp: streamlit run app.py
-```
-Dashboard sẽ tự động mở tại giao diện trình duyệt: [http://localhost:8501](http://localhost:8501)
-
-### Bước 7: Chạy Bộ Kiểm thử Tự động (Automated Test Suite)
-Chạy toàn bộ bài test kiểm tra chất lượng mã nguồn và API endpoints:
-```bash
-make test
-# Hoặc lệnh trực tiếp: python -m pytest -v
-```
-
----
-
-## 🐳 5. Triển khai ứng dụng với Docker
-
-Ứng dụng cung cấp sẵn `Dockerfile` tiêu chuẩn sản xuất (Multi-stage/Slim base) kèm cơ chế `HEALTHCHECK`:
-
-### 1. Build Docker Image
-```bash
-docker build -t predictive-maintenance-ai:latest .
-```
-
-### 2. Khởi chạy Container
-```bash
-docker run -d -p 8000:8000 --name pm-ai-service predictive-maintenance-ai:latest
-```
-
-### 3. Kiểm tra Trạng thái Container
-```bash
-docker ps
-curl http://127.0.0.1:8000/health
-```
-
----
-
-## 🔌 6. RESTful API Specification
-
-### 6.1 `GET /health`
-Kiểm tra sức khỏe hệ thống và trạng thái sẵn sàng của mô hình.
-
-**Example Response (`200 OK`):**
-```json
-{
-  "status": "ok",
-  "model_ready": true,
-  "model_version": "ai4i-calibrated-v3"
-}
-```
-
----
-
-### 6.2 `POST /predict-risk`
-Dự báo xác suất hỏng máy từ thông số cảm biến đầu vào.
-
-**Example Request Payload (`POST`):**
+**Example Request Payload (`POST /predict-risk`):**
 ```json
 {
   "Type": "M",
@@ -222,11 +140,11 @@ Dự báo xác suất hỏng máy từ thông số cảm biến đầu vào.
 }
 ```
 
-**Example Response (`200 OK`):**
+**Example Structured Response (`200 OK`):**
 ```json
 {
   "failure_risk": 0.8452,
-  "threshold": 0.3541,
+  "threshold": 0.3574,
   "risk_tier": "HIGH",
   "alert": true,
   "reason_codes": [
@@ -234,33 +152,94 @@ Dự báo xác suất hỏng máy từ thông số cảm biến đầu vào.
     "TORQUE_HIGH",
     "ROTATIONAL_SPEED_LOW"
   ],
-  "model_version": "ai4i-calibrated-v3"
+  "model_version": "ai4i-20260905-9b01f38",
+  "prediction": {
+    "failure_probability": 0.8452,
+    "model_version": "ai4i-20260905-9b01f38",
+    "ood_warning": false,
+    "ood_features": []
+  },
+  "decision": {
+    "maintenance_alert": true,
+    "threshold": 0.3574,
+    "risk_tier": "HIGH",
+    "cost_scenario": "FN5_FP1"
+  },
+  "model_explanation": [
+    {
+      "feature": "wear_load_interaction",
+      "value": 12600.0,
+      "type": "observed_feature"
+    }
+  ]
 }
 ```
 
-**Mô tả Mã Lý do Vận hành (Operational Reason Codes):**
-* `TOOL_WEAR_HIGH`: Thời gian độ mòn công cụ $\ge 200$ phút.
-* `TORQUE_HIGH`: Mô-men xoắn vận hành $\ge 55$ Nm (vượt ngưỡng chịu tải).
-* `ROTATIONAL_SPEED_LOW`: Tốc độ quay $\le 1300$ RPM (bất thường quay chậm).
-* `TEMPERATURE_DELTA_LOW`: Chênh lệch nhiệt độ $\le 8.6$ K (khả năng tản nhiệt kém).
+---
+
+## 🚀 7. Hướng dẫn Cài đặt & Vận hành
+
+### Yêu cầu Tiên quyết
+* **Python**: `3.11` trở lên
+* **Git** & **Pip**
+
+### Cài đặt & Khởi chạy nhanh
+```bash
+# 1. Cài đặt môi trường
+pip install -r requirements.txt
+
+# 2. Tải dữ liệu thô AI4I 2020
+python scripts/download_data.py
+
+# 3. Huấn luyện đa mô hình & Chọn Champion
+python -m src.train
+
+# 4. Đánh giá độc lập trên tập Test
+python -m src.evaluate
+
+# 5. Mở RESTful API Service
+python -m uvicorn src.api:app --host 0.0.0.0 --port 8000
+
+# 6. Khởi chạy Streamlit Dashboard
+streamlit run app.py
+
+# 7. Chạy Automated Test Suite
+python -m pytest -v
+```
 
 ---
 
-## 📊 7. Kết quả Đánh giá Mô hình (Model Performance)
+## 🐳 8. Containerization (Production-Oriented Setup)
 
-Bảng tổng hợp chỉ số kỹ thuật và kinh doanh được ghi nhận từ tập **Hold-out Test** (20% dữ liệu độc lập):
+Dự án cung cấp **production-oriented container setup** với Dockerfile tối ưu multi-stage build:
 
-| Metric | Giá trị (Test Set) | Giải thích |
-| :--- | :---: | :--- |
-| **PR-AUC** | `0.75+` | Chỉ số quan trọng hàng đầu cho dữ liệu mất cân bằng lớp cao (Imbalanced Data) |
-| **ROC-AUC** | `0.95+` | Khả năng phân biệt giữa máy bình thường và máy hỏng hóc |
-| **Brier Score** | `< 0.03` | Độ tin cậy của xác suất sau khi hiệu chỉnh Sigmoid |
-| **Ngưỡng tối ưu ($\theta^*$)** | `~0.35` | Ngưỡng tối ưu hóa chi phí nghiệp vụ ($C_{\text{FN}} = 5.0, C_{\text{FP}} = 1.0$) |
-| **Recall (Sensitivity)** | `> 85%` | Tỷ lệ phát hiện thành công các sự cố máy bị hỏng |
-| **Alert Rate** | `~ 5 - 8%` | Tỷ lệ đưa ra cảnh báo bảo trì trên tổng số máy vận hành |
+```bash
+# Build image
+docker build -t machine-failure-risk-system:latest .
+
+# Run container
+docker run -d -p 8000:8000 --name risk-service machine-failure-risk-system:latest
+
+# Check readiness probe
+curl http://127.0.0.1:8000/health/ready
+```
 
 ---
 
-## 📄 8. Giấy phép & Tác quyền
+## 🗺️ 9. Limitations & Future Roadmap
+
+### Hạn chế Hiện tại
+1. Dữ liệu AI4I 2020 là dữ liệu dạng Snapshot cảm biến, chưa có chuỗi thời gian liên tục (Time trajectories) để làm dự báo RUL.
+2. Chi phí nghiệp vụ FN:FP = 5:1 là giả định kịch bản minh họa (Illustrative business scenario).
+
+### Ưu tiên Phát triển Tương lai (Roadmap)
+* **P2**: Tích hợp Drift Monitoring (PSI index cho cảm biến & risk score distribution).
+* **P2**: Xây dựng Deployment Quality Gate tự động trước khi promote model mới.
+* **P3**: Mở rộng bài toán Task B với bộ dữ liệu NASA C-MAPSS / PHM cho Remaining Useful Life (RUL) forecasting.
+
+---
+
+## 📄 10. Giấy phép & Tác quyền
 
 Dự án được xây dựng phục vụ cho mục đích học tập, nghiên cứu và triển khai sản xuất tiêu chuẩn AI Engineering. Dữ liệu thuộc bản quyền UCI Machine Learning Repository (AI4I 2020 Predictive Maintenance Dataset).
+

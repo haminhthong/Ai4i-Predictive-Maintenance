@@ -1,17 +1,19 @@
-"""Bộ kiểm thử tự động (Test Suite) cho toàn bộ hệ thống Predictive Maintenance.
+"""Bộ kiểm thử tự động (Test Suite) cho toàn bộ hệ thống Machine Failure Risk & Maintenance Decision System.
 
 Các bài test bao gồm:
 - Kiểm tra tính hợp lệ dữ liệu Pydantic SensorPayload.
-- Kiểm tra hàm tạo đặc trưng vật lý (Feature Engineering).
-- Kiểm tra thuật toán tìm ngưỡng tối ưu theo chi phí (Cost-sensitive Threshold Optimization).
-- Kiểm tra đọc tệp cấu hình mô hình (config.json).
-- Kiểm tra các quy tắc sinh mã lý do vận hành (Reason Codes).
-- Kiểm tra các RESTful API Endpoints (`/health` và `/predict-risk`) bằng TestClient của FastAPI.
+- Kiểm tra tính chính xác của công thức đặc trưng vật lý (`mechanical_power` in Watts, `wear_load_interaction`).
+- Kiểm tra mã băm SHA256 dữ liệu và hàm trích xuất dải phân bố quantile.
+- Kiểm tra thuật toán tìm ngưỡng tối ưu theo chi phí và ràng buộc công suất (Capacity Constraint).
+- Kiểm tra cấu trúc tệp config.json.
+- Kiểm tra quy tắc sinh mã lý do vận hành (Reason Codes).
+- Kiểm tra các RESTful API Endpoints (`/health/live`, `/health/ready`, `/health`, `/predict-risk`).
 """
 
 from __future__ import annotations
 
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -19,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from src.api import CONFIG_PATH, SensorPayload, app, generate_operational_reason_codes
-from src.data import add_engineered_features, load_data
+from src.data import add_engineered_features, compute_dataset_sha256, extract_feature_ranges, load_data
 from src.train import BusinessCosts, analyze_cost_sensitivity, select_business_threshold
 
 client = TestClient(app)
@@ -65,7 +67,7 @@ def test_sensor_payload_rejects_unrealistic_temperature():
 def test_engineered_features_exist_in_real_split():
     """Kiểm tra các đặc trưng tạo mới xuất hiện đầy đủ trong tập dữ liệu đã chia phân tầng."""
     train_x, *_ = load_data()
-    expected_features = {"temperature_delta", "power_proxy", "strain_proxy"}
+    expected_features = {"temperature_delta", "mechanical_power", "wear_load_interaction"}
     assert expected_features <= set(train_x.columns)
 
 
@@ -84,10 +86,24 @@ def test_engineered_features_have_expected_values():
 
     # temperature_delta = 310 - 300 = 10.0
     assert res_df.loc[0, "temperature_delta"] == 10.0
-    # power_proxy = 1500 * 40 = 60000.0
-    assert res_df.loc[0, "power_proxy"] == 60_000.0
-    # strain_proxy = 20 * 40 = 800.0
-    assert res_df.loc[0, "strain_proxy"] == 800.0
+    # mechanical_power = 40 * (1500 * 2 * pi / 60) ≈ 6283.185 Watts
+    expected_power = 40.0 * (1500.0 * 2.0 * math.pi / 60.0)
+    assert pytest.approx(res_df.loc[0, "mechanical_power"], rel=1e-3) == expected_power
+    # wear_load_interaction = 20 * 40 = 800.0
+    assert res_df.loc[0, "wear_load_interaction"] == 800.0
+
+
+def test_compute_dataset_sha256_and_extract_feature_ranges():
+    """Kiểm tra tính toán checksum SHA256 và trích xuất khoảng phân bố feature ranges."""
+    train_x, *_ = load_data()
+    ranges = extract_feature_ranges(train_x)
+    assert "temperature_delta" in ranges
+    assert "p0_5" in ranges["temperature_delta"]
+    assert "p99_5" in ranges["temperature_delta"]
+
+    sha_val = compute_dataset_sha256("data/raw/ai4i2020.csv")
+    assert isinstance(sha_val, str)
+    assert len(sha_val) == 64
 
 
 def test_model_config_records_business_costs():
@@ -97,8 +113,8 @@ def test_model_config_records_business_costs():
     assert config["false_negative_cost"] > config["false_positive_cost"]
     assert set(config["features"]) >= {
         "temperature_delta",
-        "power_proxy",
-        "strain_proxy",
+        "mechanical_power",
+        "wear_load_interaction",
     }
 
 
@@ -112,6 +128,20 @@ def test_business_threshold_prefers_lower_total_cost():
 
     assert optimal_thresh == 0.6
     assert min_cost == 0.0
+
+
+def test_business_threshold_capacity_constraint():
+    """Kiểm tra ngưỡng tối ưu tuân thủ ràng buộc công suất bảo trì max_alert_rate."""
+    labels = np.array([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])  # 10 samples
+    probabilities = np.array([0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
+    costs = BusinessCosts(false_negative=5.0, false_positive=1.0)
+
+    # Chọn ngưỡng với alert_rate <= 20% (tối đa 2 alerts / 10 mẫu)
+    optimal_thresh, _ = select_business_threshold(
+        labels, probabilities, costs, max_alert_rate=0.20
+    )
+    alerts = probabilities >= optimal_thresh
+    assert alerts.mean() <= 0.20
 
 
 def test_generate_operational_reason_codes():
@@ -132,18 +162,25 @@ def test_generate_operational_reason_codes():
     assert "TEMPERATURE_DELTA_LOW" in reasons
 
 
-def test_api_health_endpoint():
-    """Kiểm tra GET /health trả về status HTTP 200 và model_ready=True."""
-    response = client.get("/health")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] in ["ok", "degraded"]
-    assert "model_ready" in data
-    assert "model_version" in data
+def test_api_health_live_and_ready_endpoints():
+    """Kiểm tra các endpoints probe /health/live, /health/ready và /health."""
+    res_live = client.get("/health/live")
+    assert res_live.status_code == 200
+    assert res_live.json()["status"] == "alive"
+
+    res_ready = client.get("/health/ready")
+    assert res_ready.status_code == 200
+    data_ready = res_ready.json()
+    assert "ready" in data_ready
+    assert "checks" in data_ready
+
+    res_health = client.get("/health")
+    assert res_health.status_code == 200
+    assert res_health.json()["status"] in ["ok", "degraded"]
 
 
 def test_api_predict_endpoint_success():
-    """Kiểm tra POST /predict-risk xử lý payload chuẩn xác và trả về kết quả dự báo."""
+    """Kiểm tra POST /predict-risk xử lý payload chuẩn xác và trả về kết quả dự báo cấu trúc đầy đủ."""
     valid_payload = {
         "Type": "L",
         "air_temperature_k": 300.0,
@@ -163,6 +200,9 @@ def test_api_predict_endpoint_success():
     assert isinstance(data["alert"], bool)
     assert "reason_codes" in data
     assert isinstance(data["reason_codes"], list)
+    assert "prediction" in data
+    assert "decision" in data
+    assert "model_explanation" in data
 
 
 def test_api_predict_endpoint_invalid_payload():
@@ -177,3 +217,4 @@ def test_api_predict_endpoint_invalid_payload():
     }
     response = client.post("/predict-risk", json=invalid_payload)
     assert response.status_code == 422  # Unprocessable Entity từ Pydantic validation
+

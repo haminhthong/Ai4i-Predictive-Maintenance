@@ -1,8 +1,10 @@
 {
   "schema_version": 2,
-  "version": "ai4i-calibrated-v3",
-  "selected_model": "logistic_sigmoid_calibrated",
-  "threshold": 0.1824258916679845,
+  "version": "ai4i-20260905-9b01f38",
+  "feature_contract_version": "ai4i-features-v2",
+  "data_sha256": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
+  "selected_model": "rf_sigmoid_calibrated",
+  "threshold": 0.3574360713649883,
   "false_negative_cost": 5.0,
   "false_positive_cost": 1.0,
   "seed": 42,
@@ -14,20 +16,20 @@
     "Torque",
     "Tool wear",
     "temperature_delta",
-    "power_proxy",
-    "strain_proxy"
+    "mechanical_power",
+    "wear_load_interaction"
   ],
   "split_contract": {
     "method": "stratified_random",
     "train_fraction": 0.64,
     "validation_fraction": 0.16,
     "test_fraction": 0.2,
-    "limitation": "Dataset không có chuỗi thời gian/machine history đủ để group-time split."
+    "limitation": "Dataset không có chuỗi thời gian/machine history đủ để group-time split hay forecast RUL."
   },
   "runtime": {
     "python": "3.13.14",
     "scikit_learn": "1.9.0",
-    "numpy": "2.5.2",
+    "numpy": "2.4.6",
     "joblib": "1.5.3"
   }
 }
