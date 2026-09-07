@@ -4,7 +4,7 @@ Quy trình quản lý dữ liệu:
 1. `load_raw_dataset()`: Nạp tệp CSV thô từ `data/raw/ai4i2020.csv`.
 2. `audit_dataset()`: Kiểm tra tính toàn vẹn, thiếu sót, trùng lặp và phân bố tỷ lệ lỗi.
 3. `create_or_load_split_registry()`: Lưu trữ hoặc nạp chỉ số phân tầng (Split Registry) cố định.
-4. `load_data()`: Trả về tập dữ liệu Train / Val / Locked Test chuẩn hóa features,
+4. `load_data()`: Trả về tập Development / Policy Validation / Locked Test chuẩn hóa features,
    tách biệt hoàn toàn nhãn mục tiêu và metadata chế độ lỗi (Failure modes).
 """
 
@@ -68,7 +68,7 @@ def audit_dataset(
     """Kiểm toán toàn diện bộ dữ liệu AI4I 2020: kiểm tra schema, missing, duplicates, prevalence."""
     clean_df = canonicalize_raw_dataframe(df)
 
-    total_rows = int(len(clean_df))
+    total_rows = len(clean_df)
     duplicate_rows = int(clean_df.duplicated().sum())
     missing_counts = {str(k): int(v) for k, v in clean_df.isnull().sum().items() if v > 0}
 
@@ -134,45 +134,53 @@ def create_or_load_split_registry(
     df: pd.DataFrame,
     seed: int = 42,
     manifest_path: str | Path = DEFAULT_SPLIT_MANIFEST_PATH,
-) -> dict[str, list[int]]:
-    """Tạo hoặc nạp danh sách chỉ số phân tầng (Split Registry) cố định (Train 64%, Val 16%, Test 20%).
+) -> dict[str, Any]:
+    """Tạo hoặc nạp registry Development 70%, Policy 15%, Locked Test 15%.
 
-    Đảm bảo tính nhất quán tuyệt đối giữa train.py, evaluate.py và error analysis.
+    Development là nơi dùng Stratified CV để so sánh mô hình và feature contract.
+    Policy Validation chỉ dùng để đóng băng ngưỡng/xếp hạng vận hành.
+    Locked Test chỉ dùng để báo cáo cuối cùng.
     """
     path = Path(manifest_path)
     if path.exists():
         try:
             with path.open("r", encoding="utf-8") as f:
                 registry = json.load(f)
-            if {"train_indices", "val_indices", "test_indices"} <= set(registry.keys()):
+            required_keys = {"development_indices", "policy_indices", "test_indices"}
+            if required_keys <= set(registry.keys()):
                 # Kiểm tra số lượng index khớp với số dòng
                 total_manifest = (
-                    len(registry["train_indices"])
-                    + len(registry["val_indices"])
+                    len(registry["development_indices"])
+                    + len(registry["policy_indices"])
                     + len(registry["test_indices"])
                 )
-                if total_manifest == len(df):
+                fractions = registry.get("split_fractions", {})
+                if total_manifest == len(df) and fractions == {
+                    "development": 0.70,
+                    "policy_validation": 0.15,
+                    "locked_test": 0.15,
+                }:
                     return registry
-        except Exception as exc:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             LOGGER.warning(f"Không thể đọc manifest hiện có, tạo lại: {exc}")
 
     clean_df = canonicalize_raw_dataframe(df)
     labels = clean_df[TARGET_COLUMN].astype(int).to_numpy()
     indices = np.arange(len(clean_df))
 
-    # Tách Test Set (20%)
-    train_val_idx, test_idx = train_test_split(
+    # Tách Locked Test (15%) trước để không tham gia bất kỳ quyết định nào.
+    development_policy_idx, test_idx = train_test_split(
         indices,
-        test_size=0.20,
+        test_size=0.15,
         stratify=labels[indices],
         random_state=seed,
     )
 
-    # Tách Train (80% của 80% = 64% tổng) và Val (20% của 80% = 16% tổng)
-    train_idx, val_idx = train_test_split(
-        train_val_idx,
-        test_size=0.20,
-        stratify=labels[train_val_idx],
+    # Tách Policy Validation (15% tổng) khỏi Development (70% tổng).
+    development_idx, policy_idx = train_test_split(
+        development_policy_idx,
+        test_size=(0.15 / 0.85),
+        stratify=labels[development_policy_idx],
         random_state=seed,
     )
 
@@ -180,14 +188,18 @@ def create_or_load_split_registry(
         "seed": seed,
         "stratification_target": TARGET_COLUMN,
         "total_samples": len(clean_df),
-        "split_fractions": {"train": 0.64, "validation": 0.16, "test": 0.20},
+        "split_fractions": {
+            "development": 0.70,
+            "policy_validation": 0.15,
+            "locked_test": 0.15,
+        },
         "split_counts": {
-            "train": len(train_idx),
-            "validation": len(val_idx),
+            "development": len(development_idx),
+            "policy_validation": len(policy_idx),
             "test": len(test_idx),
         },
-        "train_indices": [int(i) for i in train_idx],
-        "val_indices": [int(i) for i in val_idx],
+        "development_indices": [int(i) for i in development_idx],
+        "policy_indices": [int(i) for i in policy_idx],
         "test_indices": [int(i) for i in test_idx],
     }
 
@@ -220,13 +232,13 @@ def load_data(
     manifest_path: str | Path = DEFAULT_SPLIT_MANIFEST_PATH,
     return_metadata: bool = False,
 ) -> tuple[Any, ...]:
-    """Nạp toàn bộ dữ liệu, chuẩn hóa canonical, tính engineered features và phân chia theo Split Registry.
+    """Nạp dữ liệu và chia theo Development / Policy Validation / Locked Test.
 
     Returns:
         Nếu return_metadata=False:
-            (X_train, X_val, X_test, y_train, y_val, y_test)
+            (X_development, X_policy, X_test, y_development, y_policy, y_test)
         Nếu return_metadata=True:
-            (X_train, X_val, X_test, y_train, y_val, y_test, metadata_test)
+            (X_development, X_policy, X_test, y_development, y_policy, y_test, metadata_test)
             trong đó metadata_test là DataFrame chứa các failure mode hậu nghiệm (TWF, HDF, PWF, OSF, RNF)
             của riêng tập Test phục vụ Error Analysis.
     """
@@ -247,20 +259,20 @@ def load_data(
     # 4. Nạp hoặc sinh Split Registry
     registry = create_or_load_split_registry(raw_df, seed=seed, manifest_path=manifest_path)
 
-    train_idx = registry["train_indices"]
-    val_idx = registry["val_indices"]
+    development_idx = registry["development_indices"]
+    policy_idx = registry["policy_indices"]
     test_idx = registry["test_indices"]
 
-    X_train = features_df.iloc[train_idx].reset_index(drop=True)
-    X_val = features_df.iloc[val_idx].reset_index(drop=True)
+    X_development = features_df.iloc[development_idx].reset_index(drop=True)
+    X_policy = features_df.iloc[policy_idx].reset_index(drop=True)
     X_test = features_df.iloc[test_idx].reset_index(drop=True)
 
-    y_train = labels.iloc[train_idx].reset_index(drop=True)
-    y_val = labels.iloc[val_idx].reset_index(drop=True)
+    y_development = labels.iloc[development_idx].reset_index(drop=True)
+    y_policy = labels.iloc[policy_idx].reset_index(drop=True)
     y_test = labels.iloc[test_idx].reset_index(drop=True)
 
     if return_metadata:
         metadata_test = modes_df.iloc[test_idx].reset_index(drop=True)
-        return X_train, X_val, X_test, y_train, y_val, y_test, metadata_test
+        return X_development, X_policy, X_test, y_development, y_policy, y_test, metadata_test
 
-    return X_train, X_val, X_test, y_train, y_val, y_test
+    return X_development, X_policy, X_test, y_development, y_policy, y_test

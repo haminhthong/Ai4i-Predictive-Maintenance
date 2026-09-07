@@ -1,12 +1,14 @@
-"""Chính sách quyết định bảo trì (Decision Policy Engine): Tối ưu hóa ngưỡng theo chi phí và công suất vận hành.
+"""Chính sách triage và xếp hàng bảo trì.
 
-Tất cả các ngưỡng quyết định (Thresholds) PHẢI ĐƯỢC TỐI ƯU TRÊN TẬP VALIDATION VÀ ĐÓNG BĂNG.
-Tập Test tuyệt đối không được sử dụng để tìm kiếm hay điều chỉnh ngưỡng (Zero Leakage Oracle Protocol).
+Tất cả ngưỡng quyết định phải được đóng băng trên Policy Validation.
+Locked Test chỉ dùng để báo cáo, không dùng để tìm kiếm hay điều chỉnh ngưỡng.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -161,19 +163,19 @@ def tune_all_validation_policies(
     cost_thresh, min_cost = find_threshold_minimizing_cost(y_val, probs_val, costs)
 
     # 2. Chiến lược Max-F1 tối ưu trên Validation
-    max_f1_thresh, max_f1_val = find_threshold_maximizing_f1(y_val, probs_val)
+    max_f1_thresh, _ = find_threshold_maximizing_f1(y_val, probs_val)
 
     # 3. Chiến lược Ngưỡng cố định mặc định 0.50
     fixed_thresh = 0.50
 
     # 4. Ràng buộc công suất bảo trì (Capacity Constraints): 5%, 3%, 2%
-    cap_5_thresh, cost_5 = find_threshold_minimizing_cost(
+    cap_5_thresh, _ = find_threshold_minimizing_cost(
         y_val, probs_val, costs, max_alert_rate=0.05
     )
-    cap_3_thresh, cost_3 = find_threshold_minimizing_cost(
+    cap_3_thresh, _ = find_threshold_minimizing_cost(
         y_val, probs_val, costs, max_alert_rate=0.03
     )
-    cap_2_thresh, cost_2 = find_threshold_minimizing_cost(
+    cap_2_thresh, _ = find_threshold_minimizing_cost(
         y_val, probs_val, costs, max_alert_rate=0.02
     )
 
@@ -227,3 +229,78 @@ def map_decision_action(
         # Nếu cảm biến bất thường ngoài khoảng quan sát, cần review thủ công
         return "REVIEW_REQUIRED"
     return "NO_ALERT"
+
+
+def build_maintenance_queue(
+    risk_events: Iterable[dict[str, Any]],
+    capacity: int,
+) -> list[dict[str, Any]]:
+    """Xây dựng queue top-K từ các risk event mới nhất của từng tài sản.
+
+    `PRIORITY_REVIEW` là override rõ ràng và được giữ lại ngay cả khi vượt capacity.
+    Các event `UNAVAILABLE` không được đưa vào queue bảo trì vì chúng cần data review.
+    """
+    if capacity < 0:
+        raise ValueError("capacity phải là số nguyên không âm.")
+
+    latest_by_asset: dict[str, dict[str, Any]] = {}
+
+    def event_key(event: dict[str, Any]) -> tuple[int, str]:
+        value = str(event.get("event_time", ""))
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return (1, parsed.isoformat())
+        except ValueError:
+            return (0, value)
+
+    for raw_event in risk_events:
+        event = dict(raw_event)
+        asset_id = str(event.get("asset_id", "")).strip()
+        if not asset_id:
+            continue
+        if str(event.get("reliability_status", "NOMINAL")) == "UNAVAILABLE":
+            continue
+        current = latest_by_asset.get(asset_id)
+        if current is None or event_key(event) >= event_key(current):
+            latest_by_asset[asset_id] = event
+
+    eligible = [
+        event
+        for event in latest_by_asset.values()
+        if event.get("queue_eligible", True)
+        and event.get("action") in {"REVIEW_REQUIRED", "PRIORITY_REVIEW"}
+    ]
+    priority = sorted(
+        (event for event in eligible if event.get("action") == "PRIORITY_REVIEW"),
+        key=lambda event: float(event.get("risk_score", 0.0)),
+        reverse=True,
+    )
+    regular = sorted(
+        (event for event in eligible if event.get("action") == "REVIEW_REQUIRED"),
+        key=lambda event: float(event.get("risk_score", 0.0)),
+        reverse=True,
+    )[:capacity]
+
+    queue: list[dict[str, Any]] = []
+    for event in [*priority, *regular]:
+        item = dict(event)
+        item["rank"] = len(queue) + 1
+        queue.append(item)
+    return queue
+
+
+def failure_capture_at_k(
+    labels: np.ndarray,
+    probabilities: np.ndarray,
+    fraction: float,
+) -> float:
+    """Tính tỷ lệ failure nằm trong nhóm rủi ro cao nhất ở capacity fraction."""
+    if not 0 < fraction <= 1:
+        raise ValueError("fraction phải nằm trong khoảng (0, 1].")
+    y_true = np.asarray(labels, dtype=int)
+    y_prob = np.asarray(probabilities, dtype=float)
+    if y_true.shape != y_prob.shape or y_true.size == 0 or y_true.sum() == 0:
+        return 0.0
+    count = max(1, int(np.ceil(y_true.size * fraction)))
+    top_indices = np.argsort(-y_prob, kind="stable")[:count]
+    return float(y_true[top_indices].sum() / y_true.sum())

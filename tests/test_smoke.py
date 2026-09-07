@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-
 from src.api import SensorPayload, app
 from src.contracts import (
     FAILURE_MODE_COLUMNS,
@@ -29,9 +28,7 @@ from src.contracts import (
 )
 from src.data import (
     compute_dataset_sha256,
-    extract_feature_ranges,
     load_data,
-    load_raw_dataset,
 )
 from src.features import add_engineered_features, build_canonical_features
 from src.inference import RiskInferenceService
@@ -40,7 +37,6 @@ from src.policy import (
     find_threshold_maximizing_f1,
     find_threshold_minimizing_cost,
     map_decision_action,
-    tune_all_validation_policies,
 )
 
 client = TestClient(app)
@@ -174,7 +170,7 @@ def test_rf_response_does_not_claim_fake_model_explanation() -> None:
 
 def test_failure_mode_metadata_not_used_in_training() -> None:
     """INVARIANT 9: load_data(return_metadata=True) phải trả về metadata hoàn toàn tách biệt khỏi ma trận đặc trưng."""
-    X_train, X_val, X_test, y_train, y_val, y_test, modes_test = load_data(return_metadata=True)
+    _, _, X_test, _, _, _, modes_test = load_data(return_metadata=True)
     assert isinstance(modes_test, pd.DataFrame)
     assert set(modes_test.columns) <= set(FAILURE_MODE_COLUMNS)
     assert not any(col in X_test.columns for col in FAILURE_MODE_COLUMNS)

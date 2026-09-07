@@ -1,15 +1,14 @@
 """Module giám sát độ trôi dữ liệu (Data & Prediction Drift) và phân tích độ tin cậy vận hành (Operational Reliability).
 
 Cung cấp:
-1. Kiểm tra Distribution Range Guardrails dựa trên khoảng phân vị P0.5 - P99.5 của tập Train.
+1. Kiểm tra Distribution Range Guardrails dựa trên khoảng phân vị P0.5 - P99.5 của Development.
 2. Tính toán chỉ số Population Stability Index (PSI) cho các đặc trưng cảm biến.
 3. Giám sát tải vận hành (Workload & Alert Rate Monitoring).
 """
 
 from __future__ import annotations
 
-import math
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -45,6 +44,17 @@ def check_distribution_guardrails(
     return len(warnings) > 0, warnings
 
 
+def assess_distribution_guardrails(
+    features_df: pd.DataFrame,
+    reference_ranges: dict[str, dict[str, float]],
+) -> tuple[str, list[str]]:
+    """Đánh giá guardrail với ba trạng thái NOMINAL, DEGRADED và UNAVAILABLE."""
+    if not reference_ranges:
+        return "UNAVAILABLE", ["Guardrail unavailable: thiếu reference distribution."]
+    has_warning, warnings = check_distribution_guardrails(features_df, reference_ranges)
+    return ("DEGRADED" if has_warning else "NOMINAL"), warnings
+
+
 def calculate_psi(
     expected: np.ndarray,
     actual: np.ndarray,
@@ -56,7 +66,7 @@ def calculate_psi(
     Quy ước đánh giá PSI:
     - PSI < 0.1: Không có sự dịch chuyển đáng kể (Stable).
     - 0.1 <= PSI < 0.2: Có sự dịch chuyển nhẹ (Moderate Shift), cần theo dõi.
-    - PSI >= 0.2: Dịch chuyển phân bố nghiêm trọng (Significant Drift), cần đào tạo lại mô hình.
+    - PSI >= 0.2: Dịch chuyển đáng kể, cần điều tra trước khi quyết định retrain.
     """
     expected = np.asarray(expected, dtype=float)
     actual = np.asarray(actual, dtype=float)
@@ -91,15 +101,27 @@ class DriftMonitor:
         self.window_size = window_size
         self.risk_scores_window: list[float] = []
         self.alerts_window: list[bool] = []
+        self.reliability_window: list[str] = []
+        self.asset_ids_window: list[str] = []
 
-    def record_prediction(self, failure_risk: float, alert: bool) -> None:
+    def record_prediction(
+        self,
+        failure_risk: float,
+        alert: bool,
+        asset_id: str | None = None,
+        reliability_status: str = "NOMINAL",
+    ) -> None:
         """Ghi nhận một lượt suy luận mới vào cửa sổ theo dõi."""
         self.risk_scores_window.append(failure_risk)
         self.alerts_window.append(alert)
+        self.reliability_window.append(reliability_status)
+        self.asset_ids_window.append(asset_id or "unknown")
 
         if len(self.risk_scores_window) > self.window_size:
             self.risk_scores_window.pop(0)
             self.alerts_window.pop(0)
+            self.reliability_window.pop(0)
+            self.asset_ids_window.pop(0)
 
     def get_workload_summary(self) -> dict[str, Any]:
         """Tổng kết tải vận hành trong cửa sổ hiện tại."""
@@ -109,6 +131,7 @@ class DriftMonitor:
                 "window_samples": 0,
                 "mean_risk": 0.0,
                 "current_alert_rate": 0.0,
+                "reliability_warning_rate": 0.0,
             }
 
         return {
@@ -116,4 +139,8 @@ class DriftMonitor:
             "mean_risk": float(np.mean(self.risk_scores_window)),
             "current_alert_rate": float(np.mean(self.alerts_window)),
             "alert_count": int(np.sum(self.alerts_window)),
+            "reliability_warning_rate": float(
+                np.mean([status == "DEGRADED" for status in self.reliability_window])
+            ),
+            "unique_assets": len(set(self.asset_ids_window)),
         }

@@ -1,17 +1,19 @@
-"""Model Zoo & Preprocessing Pipelines cho bài toán Machine Failure Risk Classification.
+"""Pipeline tiền xử lý và mô hình cho snapshot failure-risk scoring.
 
 Cung cấp:
 1. Pipeline tiền xử lý tự động (ColumnTransformer: Median Imputer + Scaler cho cột số, OneHotEncoder cho cột phân loại).
-2. Model Zoo các ứng viên: Logistic Regression, Random Forest, HistGradientBoosting (cả dạng thô và Sigmoid Calibrated).
+2. Ba mô hình ứng viên: Logistic Regression, Random Forest và HistGradientBoosting.
+   Hiệu chuẩn xác suất được thực hiện ở stage riêng sau khi chọn base model.
 3. Các hàm đánh giá hiệu năng phân loại (PR-AUC, ROC-AUC, Brier score, ECE).
 """
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.impute import SimpleImputer
@@ -69,7 +71,7 @@ def build_pipeline(
 
 
 def get_candidate_models(seed: int = 42) -> dict[str, Any]:
-    """Tạo từ điển các mô hình ứng viên (Model Zoo) để thực hiện benchmark trên tập Validation."""
+    """Tạo ba base model để so sánh bằng Stratified CV trên Development."""
     def make_log() -> Pipeline:
         return build_pipeline(
             LogisticRegression(max_iter=1000, class_weight="balanced", C=1.0, random_state=seed)
@@ -88,26 +90,23 @@ def get_candidate_models(seed: int = 42) -> dict[str, Any]:
         )
 
     return {
-        "logistic_baseline": make_log(),
-        "logistic_sigmoid_calibrated": CalibratedClassifierCV(
-            make_log(), method="sigmoid", cv=3
-        ),
-        "random_forest_baseline": make_rf(),
-        "rf_sigmoid_calibrated": CalibratedClassifierCV(
-            make_rf(), method="sigmoid", cv=3
-        ),
-        "hist_gb_baseline": make_hgb(),
-        "hist_gb_sigmoid_calibrated": CalibratedClassifierCV(
-            make_hgb(), method="sigmoid", cv=3
-        ),
+        "logistic_regression": make_log(),
+        "random_forest": make_rf(),
+        "hist_gradient_boosting": make_hgb(),
     }
+
+
+def calibrate_model(model: Any, method: str = "sigmoid", cv: int = 3) -> Any:
+    """Bọc base model bằng calibration cross-fitted sau khi đã chọn model."""
+    if method not in {"sigmoid", "isotonic"}:
+        raise ValueError("Phương pháp calibration phải là 'sigmoid' hoặc 'isotonic'.")
+    return CalibratedClassifierCV(model, method=method, cv=cv)
 
 
 def compute_calibration_curve_and_ece(
     y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10
 ) -> tuple[float, list[dict[str, float]]]:
     """Tính toán Expected Calibration Error (ECE) và chi tiết các bin trong calibration curve."""
-    prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="uniform")
     bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
     ece = 0.0
     total_samples = len(y_true)

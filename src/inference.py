@@ -1,17 +1,11 @@
-"""Động cơ suy luận (Inference Engine) cho hệ thống Machine Failure Risk Decision System.
-
-Đảm bảo:
-1. Tách biệt hoàn toàn tầng logic ML và tầng Web API (FastAPI).
-2. Xử lý thống nhất qua Shared Feature Builder (triệt tiêu Train-Serving Skew).
-3. Đánh giá Reliability Gate qua Distribution Range Guardrail.
-4. Áp dụng Frozen Decision Policy xác định hành động (NO_ALERT, REVIEW_REQUIRED, PRIORITY_REVIEW).
-5. Phân tách rõ ràng giữa Operational Reason Codes (mã lý do vận hành chuyên gia) và Feature Context.
-"""
+"""Suy luận risk snapshot và tạo risk event cho maintenance queue."""
 
 from __future__ import annotations
 
 import json
 import logging
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -19,19 +13,25 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from .contracts import MODEL_FEATURE_CONTRACT
-from .features import build_canonical_features
-from .monitoring import check_distribution_guardrails
-from .policy import map_decision_action
+from .artifact import find_latest_release, verify_release_bundle
+from .contracts import (
+    FAILURE_MODE_COLUMNS,
+    IDENTIFIER_COLUMNS,
+    MODEL_FEATURE_CONTRACT,
+    TARGET_COLUMN,
+)
+from .features import build_canonical_features, canonicalize_raw_dataframe
+from .monitoring import assess_distribution_guardrails
+from .policy import build_maintenance_queue, map_decision_action
+from .storage import SQLiteRiskEventStore
 
-LOGGER = logging.getLogger("ai_predictive_maintenance.inference")
-
+LOGGER = logging.getLogger("ai_condition_risk.inference")
 ARTIFACTS_DIR = Path("artifacts/champion")
 MODELS_DIR = Path("models")
 
 
 class RiskInferenceService:
-    """Service thực hiện suy luận rủi ro hỏng máy và ra quyết định bảo trì."""
+    """Tải một release và chấm điểm trạng thái vận hành hiện tại."""
 
     _instance: RiskInferenceService | None = None
 
@@ -41,221 +41,319 @@ class RiskInferenceService:
         self.policy: dict[str, Any] = {}
         self.contract: dict[str, Any] = {}
         self.reference_distribution: dict[str, dict[str, float]] = {}
-        self.is_loaded: bool = False
+        self.bundle_dir: Path | None = None
+        self.artifact_checks: dict[str, Any] = {}
+        self.is_loaded = False
+        self.risk_events: list[dict[str, Any]] = []
+        self.event_store = SQLiteRiskEventStore()
         self.load_artifacts()
 
     @classmethod
     def get_instance(cls) -> RiskInferenceService:
-        """Lấy thể hiện duy nhất (Singleton) của service."""
+        """Lấy service dùng chung trong tiến trình API."""
         if cls._instance is None:
-            cls._instance = RiskInferenceService()
+            cls._instance = cls()
         return cls._instance
 
-    def load_artifacts(self) -> None:
-        """Tải các artifact đã đóng băng từ artifacts/champion/ hoặc models/."""
-        # 1. Tìm đường dẫn mô hình
+    @property
+    def is_ready(self) -> bool:
+        """Readiness chỉ đúng khi model đã tải và release integrity hợp lệ."""
+        return self.is_loaded and bool(self.artifact_checks.get("ready", False))
+
+    def _load_release(self, bundle_dir: Path) -> None:
+        checks = verify_release_bundle(bundle_dir)
+        self.artifact_checks = {
+            "bundle_exists": bool(checks.get("bundle_exists")),
+            "hashes_match": bool(checks.get("hashes_match")),
+            "required_files": not bool(checks.get("missing_files")),
+            "feature_contract_exact": False,
+            "reference_distribution_exists": False,
+            "ready": False,
+        }
+        if not checks.get("hashes_match"):
+            self.artifact_checks["error"] = checks.get("error", "Hash release không khớp.")
+            return
+
+        self.bundle_dir = bundle_dir
+        self.manifest = checks["manifest"]
+        self.model = joblib.load(bundle_dir / "model.joblib")
+        self.policy = json.loads((bundle_dir / "decision_policy.json").read_text(encoding="utf-8"))
+        self.contract = json.loads((bundle_dir / "feature_contract.json").read_text(encoding="utf-8"))
+        self.reference_distribution = json.loads(
+            (bundle_dir / "reference_distribution.json").read_text(encoding="utf-8")
+        )
+        self.artifact_checks["feature_contract_exact"] = self.contract.get("features") == list(
+            MODEL_FEATURE_CONTRACT
+        )
+        self.artifact_checks["reference_distribution_exists"] = bool(self.reference_distribution)
+        self.artifact_checks["ready"] = all(
+            self.artifact_checks[key]
+            for key in (
+                "bundle_exists",
+                "hashes_match",
+                "required_files",
+                "feature_contract_exact",
+                "reference_distribution_exists",
+            )
+        )
+
+    def _load_legacy_artifacts(self) -> None:
+        """Đọc artifact cũ trong giai đoạn chuyển đổi, không dùng làm release chuẩn."""
         model_file = ARTIFACTS_DIR / "model.joblib"
         if not model_file.exists():
             model_file = MODELS_DIR / "model.joblib"
-
         if not model_file.exists():
-            LOGGER.warning("Không tìm thấy model.joblib. Service ở trạng thái chưa sẵn sàng.")
-            self.is_loaded = False
             return
 
         self.model = joblib.load(model_file)
-
-        # 2. Tìm model manifest
         manifest_file = ARTIFACTS_DIR / "model_manifest.json"
+        config_file = MODELS_DIR / "config.json"
         if manifest_file.exists():
             self.manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
-        else:
-            config_file = MODELS_DIR / "config.json"
-            if config_file.exists():
-                cfg = json.loads(config_file.read_text(encoding="utf-8"))
-                self.manifest = {
-                    "model_version": cfg.get("version", "unknown"),
-                    "model_type": cfg.get("selected_model", "unknown"),
-                    "feature_contract_version": cfg.get("feature_contract_version", "unknown"),
-                }
+        elif config_file.exists():
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+            self.manifest = {
+                "model_version": config.get("version", "unknown"),
+                "model_type": config.get("selected_model", "unknown"),
+            }
 
-        # 3. Tìm decision policy
         policy_file = ARTIFACTS_DIR / "decision_policy.json"
         if policy_file.exists():
             self.policy = json.loads(policy_file.read_text(encoding="utf-8"))
-        else:
-            config_file = MODELS_DIR / "config.json"
-            if config_file.exists():
-                cfg = json.loads(config_file.read_text(encoding="utf-8"))
-                self.policy = {
-                    "policy_version": "maintenance-policy-v2",
-                    "primary_alert_threshold": cfg.get("threshold", 0.3574),
-                    "critical_threshold": cfg.get("critical_threshold", 0.75),
-                    "cost_weights": {
-                        "false_negative": cfg.get("false_negative_cost", 5.0),
-                        "false_positive": cfg.get("false_positive_cost", 1.0),
-                    },
-                }
+        elif config_file.exists():
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+            self.policy = config.get("decision_policy", {
+                "policy_version": "maintenance-policy-v2",
+                "primary_alert_threshold": config.get("threshold", 0.5),
+                "critical_threshold": config.get("critical_threshold", 0.75),
+            })
 
-        # 4. Tìm feature contract
         contract_file = ARTIFACTS_DIR / "feature_contract.json"
-        if contract_file.exists():
-            self.contract = json.loads(contract_file.read_text(encoding="utf-8"))
-        else:
-            self.contract = {
-                "contract_version": "ai4i-canonical-v2",
-                "features": list(MODEL_FEATURE_CONTRACT),
-            }
-
-        # 5. Tìm reference distribution
-        dist_file = ARTIFACTS_DIR / "reference_distribution.json"
-        if not dist_file.exists():
-            dist_file = MODELS_DIR / "feature_ranges.json"
-
-        if dist_file.exists():
-            self.reference_distribution = json.loads(dist_file.read_text(encoding="utf-8"))
-        else:
-            self.reference_distribution = {}
-
-        self.is_loaded = True
-        LOGGER.info(
-            f"Đã nạp thành công artifacts: Model '{self.manifest.get('model_type')}' | "
-            f"Version '{self.manifest.get('model_version')}' | "
-            f"Alert Threshold {self.policy.get('primary_alert_threshold', 0.5):.4f}"
+        self.contract = (
+            json.loads(contract_file.read_text(encoding="utf-8"))
+            if contract_file.exists()
+            else {"features": list(MODEL_FEATURE_CONTRACT)}
         )
+        distribution_file = ARTIFACTS_DIR / "reference_distribution.json"
+        if not distribution_file.exists():
+            distribution_file = MODELS_DIR / "feature_ranges.json"
+        if distribution_file.exists():
+            self.reference_distribution = json.loads(distribution_file.read_text(encoding="utf-8"))
+
+        # Legacy artifact được phép chạy để migration, nhưng không được coi là ready.
+        self.artifact_checks = {
+            "bundle_exists": False,
+            "hashes_match": False,
+            "required_files": False,
+            "feature_contract_exact": self.contract.get("features") == list(MODEL_FEATURE_CONTRACT),
+            "reference_distribution_exists": bool(self.reference_distribution),
+            "ready": False,
+            "warning": "Đang dùng artifact legacy; hãy tạo release bundle mới.",
+        }
+
+    def load_artifacts(self) -> None:
+        """Ưu tiên release bundle; chỉ fallback legacy để hỗ trợ migration."""
+        self.is_loaded = False
+        latest_release = find_latest_release()
+        try:
+            if latest_release is not None:
+                self._load_release(latest_release)
+            else:
+                self._load_legacy_artifacts()
+            self.is_loaded = self.model is not None
+        except Exception as exc:
+            self.is_loaded = False
+            self.artifact_checks = {"ready": False, "error": str(exc)}
+            LOGGER.exception("Không thể nạp artifact: %s", exc)
+
+        if self.is_loaded:
+            LOGGER.info(
+                "Đã nạp model=%s version=%s ready=%s",
+                self.manifest.get("model_type", "unknown"),
+                self.manifest.get("model_version", "unknown"),
+                self.is_ready,
+            )
 
     def extract_operational_reason_codes(self, raw_input: dict[str, Any]) -> list[str]:
-        """Sinh mã lý do vận hành chuyên gia (Heuristic Rules độc lập với ML)."""
-        reasons: list[str] = []
+        """Sinh điều kiện quan sát theo heuristic, không phải model attribution."""
+        def number(*keys: str, default: float) -> float:
+            for key in keys:
+                value = raw_input.get(key)
+                if value is not None:
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        break
+            return default
 
-        def get_val(key_canonical: str, key_legacy: str, default: float) -> float:
-            v = raw_input.get(key_canonical)
-            if v is None:
-                v = raw_input.get(key_legacy)
-            try:
-                return float(v) if v is not None else default
-            except (ValueError, TypeError):
-                return default
+        tool_wear = number("tool_wear_min", "Tool wear", default=0.0)
+        torque = number("torque_nm", "Torque", default=0.0)
+        speed = number("rotational_speed_rpm", "Rotational speed", default=1500.0)
+        process_temperature = number(
+            "process_temperature_k", "Process temperature", default=310.0
+        )
+        air_temperature = number("air_temperature_k", "Air temperature", default=300.0)
 
-        tool_wear = get_val("tool_wear_min", "Tool wear", 0.0)
-        torque = get_val("torque_nm", "Torque", 0.0)
-        speed = get_val("rotational_speed_rpm", "Rotational speed", 1500.0)
-        proc_temp = get_val("process_temperature_k", "Process temperature", 310.0)
-        air_temp = get_val("air_temperature_k", "Air temperature", 300.0)
-
-        if tool_wear >= 200.0:
-            reasons.append("TOOL_WEAR_HIGH")
-        if torque >= 55.0:
-            reasons.append("TORQUE_HIGH")
-        if speed <= 1300.0:
-            reasons.append("ROTATIONAL_SPEED_LOW")
-        if (proc_temp - air_temp) <= 8.6:
-            reasons.append("TEMPERATURE_DELTA_LOW")
-
-        return reasons
+        observed: list[str] = []
+        if tool_wear >= 200:
+            observed.append("TOOL_WEAR_HIGH")
+        if torque >= 55:
+            observed.append("TORQUE_HIGH")
+        if speed <= 1300:
+            observed.append("ROTATIONAL_SPEED_LOW")
+        if process_temperature - air_temperature <= 8.6:
+            observed.append("TEMPERATURE_DELTA_LOW")
+        return observed
 
     def extract_feature_context(self, feature_df: pd.DataFrame) -> list[dict[str, Any]]:
-        """Trả về ngữ cảnh giá trị đặc trưng quan sát (Feature Context).
-
-        LƯU Ý: Với mô hình Random Forest / Ensembles, đây là Input Feature Context quan sát được,
-        không phải là Attribution / Explanation xấp xỉ giả lập.
-        """
-        context_items: list[dict[str, Any]] = []
-        for col in feature_df.columns:
-            val = feature_df[col].iloc[0]
-            context_items.append(
+        """Trả về giá trị quan sát, không gắn nhãn là giải thích mô hình."""
+        context: list[dict[str, Any]] = []
+        for column in feature_df.columns:
+            value = feature_df[column].iloc[0]
+            context.append(
                 {
-                    "feature": col,
-                    "value": round(float(val), 2) if isinstance(val, (int, float, np.number)) else str(val),
+                    "feature": column,
+                    "value": round(float(value), 2)
+                    if isinstance(value, (int, float, np.number))
+                    else str(value),
                     "type": "observed_feature",
                 }
             )
-        return context_items
+        return context
 
     def predict(self, raw_payload: dict[str, Any]) -> dict[str, Any]:
-        """Thực hiện chu trình suy luận đầy đủ: Input -> Feature -> Model -> Gate -> Policy -> Output."""
+        """Chấm điểm snapshot: contract -> features -> risk -> reliability -> triage."""
         if not self.is_loaded or self.model is None:
-            raise RuntimeError(
-                "Mô hình chưa sẵn sàng hoạt động. Vui lòng kiểm tra artifacts đã được huấn luyện."
+            raise RuntimeError("Mô hình chưa sẵn sàng hoạt động.")
+
+        canonical_payload = canonicalize_raw_dataframe(pd.DataFrame([raw_payload]))
+        forbidden_columns = set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
+        leaked_columns = sorted(forbidden_columns & set(canonical_payload.columns))
+        if leaked_columns:
+            raise ValueError(
+                f"Inference payload chứa cột bị cấm hoặc target-derived: {leaked_columns}"
             )
 
-        # 1. Chuyển đổi qua Shared Feature Builder (chống Skew)
-        input_df = pd.DataFrame([raw_payload])
-        features_df = build_canonical_features(input_df, expected_features=MODEL_FEATURE_CONTRACT)
-
-        # 2. Tính toán xác suất rủi ro hỏng máy (Calibrated Failure Risk)
-        failure_prob = float(self.model.predict_proba(features_df)[0, 1])
-
-        # 3. Đánh giá Reliability Gate (Distribution Range Guardrail)
-        has_warning, warning_features = check_distribution_guardrails(
-            features_df, self.reference_distribution
+        features = build_canonical_features(
+            canonical_payload, expected_features=MODEL_FEATURE_CONTRACT
         )
-        reliability_status = "DEGRADED" if has_warning else "NOMINAL"
-
-        # 4. Áp dụng Frozen Decision Policy
-        alert_thresh = float(self.policy.get("primary_alert_threshold", 0.3574))
-        critical_thresh = float(self.policy.get("critical_threshold", 0.75))
-        cost_weights = self.policy.get("cost_weights", {"false_negative": 5.0, "false_positive": 1.0})
-        fn_w = float(cost_weights.get("false_negative", 5.0))
-        fp_w = float(cost_weights.get("false_positive", 1.0))
-
-        decision_action = map_decision_action(
-            failure_risk=failure_prob,
-            alert_threshold=alert_thresh,
-            critical_threshold=critical_thresh,
-            distribution_warning=has_warning,
+        risk_score = float(self.model.predict_proba(features)[0, 1])
+        reliability_status, warning_features = assess_distribution_guardrails(
+            features, self.reference_distribution
         )
-        is_alert = decision_action in ["REVIEW_REQUIRED", "PRIORITY_REVIEW"]
+        distribution_warning = reliability_status == "DEGRADED"
 
-        # 5. Sinh mã lý do vận hành và ngữ cảnh đặc trưng
-        reason_codes = self.extract_operational_reason_codes(raw_payload)
-        feature_context = self.extract_feature_context(features_df)
+        alert_threshold = float(self.policy.get("primary_alert_threshold", 0.5))
+        critical_threshold = float(self.policy.get("critical_threshold", 0.75))
+        if reliability_status == "UNAVAILABLE":
+            action = "REVIEW_REQUIRED"
+            queue_eligible = False
+        else:
+            action = map_decision_action(
+                risk_score,
+                alert_threshold=alert_threshold,
+                critical_threshold=critical_threshold,
+                distribution_warning=distribution_warning,
+            )
+            queue_eligible = True
 
-        model_ver = self.manifest.get("model_version", "v2")
-        policy_ver = self.policy.get("policy_version", "maintenance-policy-v2")
-
-        # Ánh xạ risk tier tương thích ngược
-        risk_tier_map = {
+        observed_conditions = self.extract_operational_reason_codes(raw_payload)
+        feature_context = self.extract_feature_context(features)
+        event_id = str(raw_payload.get("event_id") or f"evt_{uuid.uuid4().hex[:12]}")
+        asset_id = str(raw_payload.get("asset_id") or "UNKNOWN_ASSET")
+        event_time = str(
+            raw_payload.get("event_time")
+            or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        )
+        model_version = str(self.manifest.get("model_version", "unknown"))
+        policy_version = str(self.policy.get("policy_version", "unknown"))
+        priority = {
             "PRIORITY_REVIEW": "HIGH",
             "REVIEW_REQUIRED": "MEDIUM",
             "NO_ALERT": "LOW",
+        }[action]
+        event = {
+            "event_id": event_id,
+            "asset_id": asset_id,
+            "event_time": event_time,
+            "shift": raw_payload.get("shift"),
+            "risk_score": round(risk_score, 6),
+            "action": action,
+            "reliability_status": reliability_status,
+            "queue_eligible": queue_eligible,
+            "observed_conditions": observed_conditions,
+            "model_version": model_version,
+            "policy_version": policy_version,
         }
-        risk_tier = risk_tier_map.get(decision_action, "LOW")
+        self.risk_events.append(event)
+        try:
+            self.event_store.record_event(event, raw_payload)
+        except Exception:
+            # Lưu trữ không được làm thay đổi điểm risk; lỗi sẽ được monitoring ghi nhận.
+            LOGGER.exception("Không thể ghi risk event vào SQLite.")
 
-        # 6. Đóng gói phản hồi theo cấu trúc 4 khối chuẩn mực
         return {
-            # Khối 1: Dự báo ML thuần túy
-            "prediction": {
-                "failure_risk": round(failure_prob, 4),
-                "model_version": model_ver,
-                "model_type": self.manifest.get("model_type", "calibrated_ensemble"),
+            "event_id": event_id,
+            "asset_id": asset_id,
+            "event_time": event_time,
+            "risk": {
+                "snapshot_failure_risk": round(risk_score, 4),
+                "model_version": model_version,
             },
-            # Khối 2: Độ tin cậy & Cảnh báo phân bố
+            "prediction": {
+                "snapshot_failure_risk": round(risk_score, 4),
+                "failure_risk": round(risk_score, 4),
+                "model_version": model_version,
+                "model_type": self.manifest.get("model_type", "unknown"),
+            },
             "reliability": {
                 "status": reliability_status,
-                "distribution_warning": has_warning,
+                "distribution_warning": distribution_warning,
                 "warning_features": warning_features,
             },
-            # Khối 3: Quyết định vận hành
+            "triage": {
+                "priority": priority,
+                "queue_eligible": queue_eligible,
+                "policy_version": policy_version,
+            },
             "decision": {
-                "action": decision_action,
-                "alert_threshold": alert_thresh,
-                "critical_threshold": critical_thresh,
-                "maintenance_alert": is_alert,
-                "policy_version": policy_ver,
-                "cost_scenario": f"FN{fn_w:.0f}_FP{fp_w:.0f}",
+                "action": action,
+                "alert_threshold": alert_threshold,
+                "critical_threshold": critical_threshold,
+                "maintenance_alert": action != "NO_ALERT",
+                "policy_version": policy_version,
+                "cost_scenario": self._cost_scenario(),
             },
-            # Khối 4: Ngữ cảnh vận hành & Giải thích
+            "observed_conditions": observed_conditions,
             "operational_context": {
-                "reason_codes": reason_codes,
+                "observed_conditions": observed_conditions,
+                "reason_codes": observed_conditions,
                 "feature_context": feature_context,
+                "note": "Điều kiện heuristic quan sát được, không phải model attribution.",
             },
-            # Các trường tương thích ngược ở cấp root
-            "failure_risk": round(failure_prob, 4),
-            "threshold": alert_thresh,
-            "risk_tier": risk_tier,
-            "alert": is_alert,
-            "reason_codes": reason_codes,
-            "model_version": model_ver,
+            # Các trường phẳng giữ tương thích với client cũ.
+            "failure_risk": round(risk_score, 4),
+            "threshold": alert_threshold,
+            "risk_tier": priority,
+            "alert": action != "NO_ALERT",
+            "reason_codes": observed_conditions,
+            "model_version": model_version,
             "model_explanation": feature_context,
         }
+
+    def _cost_scenario(self) -> str:
+        costs = self.policy.get("cost_weights", {})
+        return f"FN{float(costs.get('false_negative', 5.0)):.0f}_FP{float(costs.get('false_positive', 1.0)):.0f}"
+
+    def build_queue(self, capacity: int, shift: str | None = None) -> list[dict[str, Any]]:
+        """Xếp queue từ các risk event đã ghi nhận trong tiến trình hiện tại."""
+        persisted_events = self.event_store.list_risk_events()
+        if shift is not None:
+            persisted_events = [
+                event for event in persisted_events if event.get("shift") == shift
+            ]
+        return build_maintenance_queue(persisted_events, capacity=capacity)
+
+    def record_review(self, review: dict[str, Any]) -> None:
+        """Ghi review kỹ thuật viên mà không thay đổi model trong runtime."""
+        self.event_store.record_review(**review)

@@ -158,3 +158,7 @@ data/raw/*.parquet
 !reports/*.json
 !artifacts/champion/*.json
 
+# Dữ liệu runtime sinh ra khi API ghi risk event
+data/runtime/
+*.sqlite3
+

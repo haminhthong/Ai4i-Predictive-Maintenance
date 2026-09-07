@@ -1,0 +1,50 @@
+{
+  "total_twf": 5,
+  "detected": {
+    "count": 1,
+    "summary": {
+      "tool_wear_min": {
+        "mean": 204.0,
+        "min": 204.0,
+        "max": 204.0
+      },
+      "torque_nm": {
+        "mean": 62.4,
+        "min": 62.4,
+        "max": 62.4
+      },
+      "wear_load_interaction": {
+        "mean": 12729.6,
+        "min": 12729.6,
+        "max": 12729.6
+      }
+    },
+    "product_quality_type_counts": {
+      "M": 1
+    }
+  },
+  "missed": {
+    "count": 4,
+    "summary": {
+      "tool_wear_min": {
+        "mean": 214.25,
+        "min": 198.0,
+        "max": 235.0
+      },
+      "torque_nm": {
+        "mean": 33.75,
+        "min": 29.0,
+        "max": 38.2
+      },
+      "wear_load_interaction": {
+        "mean": 7179.55,
+        "min": 6618.5,
+        "max": 7721.099999999999
+      }
+    },
+    "product_quality_type_counts": {
+      "L": 3,
+      "M": 1
+    }
+  }
+}

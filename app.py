@@ -1,30 +1,30 @@
-"""Giao diện Dashboard trực quan hoá Hệ thống Phân loại Rủi ro & Quyết định Bảo trì Máy móc (AI4I Machine Failure Risk Decision System).
+"""Dashboard cho hệ thống Condition-Based Maintenance Risk Triage AI4I.
 
 Ứng dụng hỗ trợ:
-1. Điều chỉnh thông số cảm biến vận hành thời gian thực.
-2. Gọi Inference Engine chuẩn hóa (Shared Feature Builder, Calibrated Model, Reliability Gate, Decision Policy).
-3. Đánh giá Reliability Gate (Distribution Range Guardrail: P0.5 - P99.5 của tập Train).
+1. Điều chỉnh metadata và thông số cảm biến của operating snapshot.
+2. Gọi Inference Engine dùng release bundle và shared feature builder.
+3. Đánh giá Reliability Gate (P0.5 - P99.5 của Development).
 4. Phân định minh bạch giữa 4 Khối:
-   - Dự báo Rủi ro Xác suất (Prediction Block)
+   - Điểm Rủi ro Snapshot (Risk Block)
    - Trạng thái Tin cậy / Phân bố (Reliability Gate)
    - Quyết định Vận hành (Decision Action: NO_ALERT / REVIEW_REQUIRED / PRIORITY_REVIEW)
-   - Ngữ cảnh Vận hành & Đặc trưng (Reason Codes & Feature Context)
-5. Trực quan hóa Threshold Ablation Study, Capacity Constraints và Phân tích lát cắt Failure-Mode Recall.
+   - Điều kiện Quan sát & Đặc trưng (Observed Conditions & Feature Context)
+5. Trực quan hóa locked-test metrics và phân tích lát cắt failure mode.
 """
 
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-
 from src.inference import RiskInferenceService
 
 # Thiết lập cấu hình trang Streamlit
 st.set_page_config(
-    page_title="AI4I Machine Failure Risk Decision System",
+    page_title="AI4I Condition-Based Maintenance Risk Triage",
     page_icon="⚙️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -82,12 +82,12 @@ st.markdown(
 
 def main() -> None:
     st.markdown(
-        '<div class="main-header">⚙️ AI4I Machine Failure Risk Decision System</div>',
+        '<div class="main-header">⚙️ AI4I Condition-Based Maintenance Risk Triage</div>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<div class="sub-header">Leakage-safe machine-failure risk scoring with calibrated probabilities, '
-        'cost-sensitive maintenance decisions, reliability guardrails, operational reason codes and production-oriented serving.</div>',
+        '<div class="sub-header">Risk scoring cho operating snapshot hiện tại, có leakage quarantine, '
+        'calibration, reliability guardrail, queue theo capacity và release checksum. Điểm risk không dự báo thời điểm hỏng.</div>',
         unsafe_allow_html=True,
     )
 
@@ -96,24 +96,24 @@ def main() -> None:
         st.code(
             """
 OFFLINE ML PIPELINE:
-Raw AI4I Observations -> Data Contract & Audit (SHA256, Schema, Prevalence)
+Raw AI4I Snapshot -> Data Contract & Audit (SHA256, Schema, Prevalence)
       ↓
 Leakage Quarantine (Drop Target, UDI, Product ID, isolate TWF/HDF/PWF/OSF/RNF for Eval only)
       ↓
 Shared Feature Contract (Raw Sensors + temperature_delta_k + mechanical_power_w + wear_load_interaction)
       ↓
-Stratified Split Registry (Train 64% / Validation 16% / Locked Test 20%)
+Split Registry (Development 70% / Policy Validation 15% / Locked Test 15%)
       ↓
-Model Zoo Benchmark (Logistic, Random Forest, HistGB + Sigmoid Calibration) -> Select Champion
+Development 5-fold CV (Logistic baseline / Random Forest / HistGB challenger)
       ↓
-Decision Policy Optimization (Validation Probabilities + FN=5x, FP=1x + Capacity Constraints) -> Freeze Policy
+Chọn Random Forest trong tolerance -> Sigmoid Calibration -> Policy Validation -> Freeze Policy
       ↓
 Locked Hold-out Test Evaluation (Zero-leakage metrics, Failure-Mode Slices, Error Analysis)
 
 ONLINE SERVING PIPELINE:
-Sensor Snapshot -> Shared Feature Builder -> Champion Model -> Calibrated Failure Risk
+Sensor Event (asset/time metadata) -> Shared Feature Builder -> Snapshot Risk Score
       ↓
-Reliability Gate (Distribution Range Guardrail) -> Frozen Decision Policy -> Action (NO_ALERT / REVIEW / PRIORITY)
+Reliability Gate (NOMINAL / DEGRADED / UNAVAILABLE) -> Triage -> Risk Event Store -> Top-K Queue
       ↓
 Operational Reason Codes + Feature Context -> 4-Block API Response
             """,
@@ -123,8 +123,8 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
     # Khởi tạo Inference Service
     try:
         service = RiskInferenceService.get_instance()
-        service_ready = service.is_loaded
-    except Exception as exc:
+        service_ready = service.is_ready
+    except (OSError, RuntimeError, ValueError) as exc:
         service_ready = False
         st.error(f"⚠️ Lỗi khởi tạo Inference Service: {exc}")
 
@@ -135,28 +135,26 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
         test_metrics_path = Path("reports/test_metrics.json")
 
     if test_metrics_path.exists():
-        try:
+        with suppress(OSError, json.JSONDecodeError):
             test_metrics = json.loads(test_metrics_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
 
     failure_modes_path = Path("reports/failure_mode_analysis.json")
     failure_modes_data = {}
     if failure_modes_path.exists():
-        try:
+        with suppress(OSError, json.JSONDecodeError):
             failure_modes_data = json.loads(failure_modes_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
 
     # Sidebar: Nhập thông số cảm biến thời gian thực
     st.sidebar.header("🎛️ Thông số cảm biến thời gian thực")
 
-    machine_type = st.sidebar.selectbox(
-        "Chất lượng sản phẩm / Máy (Type)",
+    product_quality_type = st.sidebar.selectbox(
+        "Chất lượng sản phẩm (product_quality_type)",
         options=["L", "M", "H"],
         index=1,
-        help="L: Low quality (50% dataset), M: Medium quality (30%), H: High quality (20%)",
+        help="L/M/H là chất lượng sản phẩm trong AI4I, không phải machine identity.",
     )
+
+    asset_id = st.sidebar.text_input("Asset ID", value="MACHINE_DEMO_001")
 
     air_temp = st.sidebar.slider(
         "Nhiệt độ không khí buồng máy (Air Temp - K)",
@@ -219,7 +217,8 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
 
     if service_ready:
         raw_payload = {
-            "Type": machine_type,
+            "asset_id": asset_id,
+            "product_quality_type": product_quality_type,
             "air_temperature_k": air_temp,
             "process_temperature_k": proc_temp,
             "rotational_speed_rpm": speed_rpm,
@@ -235,21 +234,20 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
         dec_block = result["decision"]
         ops_block = result["operational_context"]
 
-        failure_risk = pred_block["failure_risk"]
+        failure_risk = pred_block["snapshot_failure_risk"]
         action = dec_block["action"]
-        is_alert = dec_block["maintenance_alert"]
-        has_warning = rel_block["distribution_warning"]
+        has_warning = rel_block["status"] != "NOMINAL"
 
         # Chọn CSS class theo action
         if action == "PRIORITY_REVIEW":
             box_class = "action-priority"
-            action_text = "🚨 PRIORITY REVIEW: RỦI RO CỰC CAO - ĐƯA VÀO HÀNG ĐỢI BẢO TRÌ KHẨN CẤP"
+            action_text = "🚨 PRIORITY REVIEW: ĐƯA VÀO HÀNG ĐỢI BẢO TRÌ ƯU TIÊN"
         elif action == "REVIEW_REQUIRED":
             box_class = "action-review"
             action_text = "⚠️ REVIEW REQUIRED: RỦI RO VƯỢT NGƯỠNG - ĐƯA VÀO HÀNG ĐỢI KIỂM TRA ĐỊNH KỲ"
         else:
             box_class = "action-noalert"
-            action_text = "🟢 NO ALERT: THIẾT BỊ HOẠT ĐỘNG BÌNH THƯỜNG TRONG NGƯỠNG AN TOÀN"
+            action_text = "🟢 NO ALERT: CHƯA CẦN ĐƯA VÀO QUEUE THEO POLICY HIỆN TẠI"
 
         left_col, right_col = st.columns([1, 1])
 
@@ -275,7 +273,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
                 <div class="{box_class}">
                     <h3>Hành động Đề xuất: {action}</h3>
                     <p style="font-size: 1.7rem; font-weight: bold; margin-bottom: 0.2rem;">
-                        Xác suất rủi ro hỏng máy: {failure_risk * 100:.2f}%
+                        Điểm rủi ro snapshot: {failure_risk * 100:.2f}%
                     </p>
                     <p style="font-size: 1.05rem;"><b>Khuyến nghị Vận hành:</b> {action_text}</p>
                     <p style="font-size: 0.85rem; margin-top: 0.5rem; opacity: 0.85;">
@@ -289,13 +287,13 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
 
             st.progress(failure_risk)
 
-            st.markdown("#### 🚨 Mã Lý do Vận hành Chuyên gia (Operational Reason Codes):")
-            st.caption("Các quy tắc heuristic độc lập dùng cho kỹ sư nhà máy nhanh chóng xác định nguyên nhân bất thường:")
-            if ops_block["reason_codes"]:
-                for code in ops_block["reason_codes"]:
+            st.markdown("#### 🚨 Điều kiện Quan sát được (Observed Conditions):")
+            st.caption("Các điều kiện heuristic độc lập; đây không phải model attribution:")
+            if ops_block["observed_conditions"]:
+                for code in ops_block["observed_conditions"]:
                     st.warning(f"• **{code}**")
             else:
-                st.success("• Không phát hiện bất thường cơ học/nhiệt theo quy tắc chuyên gia.")
+                st.success("• Không phát hiện điều kiện bất thường theo heuristic.")
 
             st.markdown("#### 🔍 Ngữ cảnh Đặc trưng Quan sát (Feature Context):")
             st.caption("Các giá trị cảm biến và đặc trưng phái sinh tại thời điểm snapshot:")

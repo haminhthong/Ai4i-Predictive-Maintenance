@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,7 @@ from .contracts import (
     ENGINEERED_FEATURES,
     MODEL_FEATURE_CONTRACT,
     RAW_TO_CANONICAL_COLUMN_MAP,
+    VALID_QUALITY_TYPES,
 )
 
 
@@ -49,9 +50,25 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     clean_df = clean_df.rename(columns=rename_mapping)
 
+    # Chặn tình huống một payload gửi đồng thời nhiều alias của cùng một trường.
+    # Chọn giá trị đầu tiên khác null để tránh tạo hai cột cùng tên sau rename.
+    if clean_df.columns.duplicated().any():
+        merged = pd.DataFrame(index=clean_df.index)
+        for column in dict.fromkeys(clean_df.columns):
+            duplicate_values = clean_df.loc[:, clean_df.columns == column]
+            merged[column] = duplicate_values.bfill(axis=1).iloc[:, 0]
+        clean_df = merged
+
     # Chuẩn hóa giá trị cột quality_type nếu có
     if "quality_type" in clean_df.columns:
         clean_df["quality_type"] = clean_df["quality_type"].astype(str).str.strip().str.upper()
+        invalid_types = sorted(
+            set(clean_df["quality_type"].dropna()) - set(VALID_QUALITY_TYPES)
+        )
+        if invalid_types:
+            raise ValueError(
+                f"quality_type không hợp lệ: {invalid_types}; chỉ nhận L, M hoặc H."
+            )
 
     return clean_df
 

@@ -1,0 +1,15 @@
+{
+  "model_version": "ai4i-risk-v3.0.0-20260907162446-9b01f38",
+  "model_type": "random_forest",
+  "calibration": "sigmoid_cv3",
+  "framework": "scikit-learn",
+  "data_hash": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
+  "git_sha": "git_unavailable",
+  "created_at_utc": "2026-09-07T16:24:46.909392+00:00",
+  "runtime_environment": {
+    "python": "3.12.14",
+    "scikit_learn": "1.9.0",
+    "numpy": "2.3.5",
+    "joblib": "1.6.0"
+  }
+}

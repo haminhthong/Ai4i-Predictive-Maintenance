@@ -1,0 +1,5 @@
+{
+  "method": "sigmoid",
+  "cv": 3,
+  "fit_scope": "development_only"
+}

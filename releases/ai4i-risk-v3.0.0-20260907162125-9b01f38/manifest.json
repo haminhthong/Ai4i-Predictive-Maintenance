@@ -1,0 +1,23 @@
+{
+  "manifest_version": 1,
+  "release_version": "ai4i-risk-v3.0.0-20260907162125-9b01f38",
+  "model_version": "ai4i-risk-v3.0.0-20260907162125-9b01f38",
+  "model_type": "hist_gradient_boosting",
+  "file_hashes": {
+    "calibration.json": "3399d2db1b26a0b75edf5b63b51b71a16f513c35b5dbd38f5130e9badadb01c3",
+    "data_manifest.json": "88f15aa213c3f339f92dd63d404ff83ecf8336f292bcfa9e52f93c42e00ca2f5",
+    "decision_policy.json": "ee126543f7c992dcfd8d9e621346fbd64820a3f70d28f3323142d99a97df61f4",
+    "feature_contract.json": "5ab97d9f16435077c09a5545f54723ae790ff3df357ff3357c1812904e03d5eb",
+    "locked_test_metrics.json": "15866cff0a5b9ad79acffbeb52b2a2fa2c66b128ca7d288592ca0c6976829064",
+    "model.joblib": "ab9b0ea48525bb2f1df7b2fefb1700f5b9911e9285235f94314b4b6e6bfe4a8c",
+    "MODEL_CARD.md": "ef8d07d0548e417e5b3b03cf89f8630ea842aeca2a1afb9c16d04ecfa5723150",
+    "model_config.json": "de6ce8d97ae5f8e076e351c73f9599fabc87a782fc1c1043e20386f9ca98fc6b",
+    "reference_distribution.json": "335e05a9ddee56944edfa874a30e59d7583ec9ef996ff8a54c6b6c9a1a2b432c",
+    "validation_metrics.json": "c2217e342abacc8baa44733a46f828f14d9a3d4b9b5d29baff19f00053944a82"
+  },
+  "model_sha256": "ab9b0ea48525bb2f1df7b2fefb1700f5b9911e9285235f94314b4b6e6bfe4a8c",
+  "feature_contract_sha256": "5ab97d9f16435077c09a5545f54723ae790ff3df357ff3357c1812904e03d5eb",
+  "policy_sha256": "ee126543f7c992dcfd8d9e621346fbd64820a3f70d28f3323142d99a97df61f4",
+  "reference_distribution_sha256": "335e05a9ddee56944edfa874a30e59d7583ec9ef996ff8a54c6b6c9a1a2b432c",
+  "git_sha": "git_unavailable"
+}

@@ -19,9 +19,11 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from .artifact import find_latest_release, sha256_file
 from .contracts import FAILURE_MODE_COLUMNS, FAILURE_MODE_DESCRIPTIONS
 from .data import load_data
 from .models import compute_calibration_curve_and_ece, compute_classification_metrics
+from .policy import failure_capture_at_k
 from .utils import LOGGER, save_json, setup_logging
 
 ARTIFACTS_DIR = Path("artifacts/champion")
@@ -30,7 +32,21 @@ REPORTS_DIR = Path("reports")
 
 
 def load_frozen_artifacts() -> tuple[Any, dict[str, Any], dict[str, Any]]:
-    """Nạp mô hình và chính sách quyết định đã đóng băng từ thư mục artifacts hoặc models."""
+    """Nạp model/policy từ release bundle đã đóng băng."""
+    release_dir = find_latest_release()
+    if release_dir is not None:
+        model = joblib.load(release_dir / "model.joblib")
+        policy = json.loads((release_dir / "decision_policy.json").read_text(encoding="utf-8"))
+        config = json.loads((release_dir / "model_config.json").read_text(encoding="utf-8"))
+        manifest = json.loads((release_dir / "manifest.json").read_text(encoding="utf-8"))
+        manifest.update(
+            {
+                "model_version": config.get("model_version", manifest.get("release_version")),
+                "model_type": config.get("model_type", manifest.get("model_type", "unknown")),
+            }
+        )
+        return model, policy, manifest
+
     model_path = ARTIFACTS_DIR / "model.joblib"
     if not model_path.exists():
         model_path = MODELS_DIR / "model.joblib"
@@ -138,11 +154,54 @@ def analyze_false_negatives_and_positives(
     }
 
 
+def evaluate_twf_error_slice(
+    X_test: pd.DataFrame,
+    modes_test: pd.DataFrame,
+    test_preds: np.ndarray,
+) -> dict[str, Any]:
+    """So sánh feature snapshot giữa TWF detected và TWF missed."""
+    if "failure_twf" not in modes_test.columns:
+        return {"status": "failure_twf metadata unavailable"}
+    twf_mask = modes_test["failure_twf"].to_numpy().astype(int) == 1
+    detected = twf_mask & (test_preds == 1)
+    missed = twf_mask & (test_preds == 0)
+    result: dict[str, Any] = {
+        "total_twf": int(twf_mask.sum()),
+        "detected": int(detected.sum()),
+        "missed": int(missed.sum()),
+    }
+    for group_name, mask in (("detected", detected), ("missed", missed)):
+        group = X_test.loc[mask]
+        result[group_name] = {
+            "count": len(group),
+            "summary": {
+                column: {
+                    "mean": float(group[column].mean()),
+                    "min": float(group[column].min()),
+                    "max": float(group[column].max()),
+                }
+                for column in (
+                    "tool_wear_min",
+                    "torque_nm",
+                    "wear_load_interaction",
+                    "quality_type",
+                )
+                if column in group.columns and len(group) > 0 and column != "quality_type"
+            },
+            "product_quality_type_counts": (
+                group["quality_type"].value_counts().to_dict()
+                if "quality_type" in group.columns
+                else {}
+            ),
+        }
+    return result
+
+
 def evaluate_model_on_locked_test() -> dict[str, Any]:
     """Đánh giá mô hình đã đóng băng trên tập Locked Hold-out Test hoàn toàn độc lập."""
     LOGGER.info("=== BẮT ĐẦU ĐÁNH GIÁ TRÊN TẬP LOCKED TEST (HOLD-OUT) ===")
 
-    # 1. Nạp dữ liệu tập Test kèm metadata phân tích lỗi (20% dữ liệu)
+    # 1. Nạp Locked Test kèm metadata phân tích lỗi (15% dữ liệu)
     _, _, X_test, _, _, y_test, modes_test = load_data(return_metadata=True)
     y_test_arr = y_test.to_numpy()
     LOGGER.info(f"Tập Test độc lập gồm {len(X_test)} mẫu ({int(np.sum(y_test_arr))} ca hỏng máy).")
@@ -155,7 +214,9 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
     fp_w = float(cost_weights.get("false_positive", 1.0))
 
     primary_thresh = float(policy.get("primary_alert_threshold", 0.3574))
-    LOGGER.info(f"Áp dụng ngưỡng quyết định tối ưu đã đóng băng từ Validation: {primary_thresh:.4f}")
+    LOGGER.info(
+        f"Áp dụng ngưỡng đã đóng băng từ Policy Validation: {primary_thresh:.4f}"
+    )
 
     # 3. Tính toán xác suất dự báo rủi ro
     y_probs = model.predict_proba(X_test)[:, 1]
@@ -192,6 +253,7 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
     error_analysis = analyze_false_negatives_and_positives(
         X_test, y_test_arr, y_probs, test_preds, modes_test
     )
+    twf_error_analysis = evaluate_twf_error_slice(X_test, modes_test, test_preds)
 
     # 9. Tổng hợp kết quả báo cáo
     final_test_report = {
@@ -219,20 +281,47 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
             "weighted_decision_cost": primary_metrics["weighted_cost"],
             "cost_units_per_1000_observations": primary_metrics["cost_units_per_1000"],
             "confusion_matrix": primary_metrics["confusion_matrix"],
+            "failure_capture_at_1pct": failure_capture_at_k(y_test_arr, y_probs, 0.01),
+            "failure_capture_at_2pct": failure_capture_at_k(y_test_arr, y_probs, 0.02),
+            "failure_capture_at_3pct": failure_capture_at_k(y_test_arr, y_probs, 0.03),
         },
         "threshold_ablation_study": ablation_study,
         "failure_mode_analysis": failure_slices,
         "error_analysis_fn_fp": error_analysis,
+        "twf_error_analysis": twf_error_analysis,
         "calibration_curve": calib_points,
     }
 
-    # 10. Lưu các báo cáo chi tiết
+    # 10. Lưu các báo cáo chi tiết. Báo cáo legacy có thể bị khóa bởi dashboard;
+    # release bundle vẫn là nguồn chuẩn và được ghi riêng ở bên dưới.
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    save_json(REPORTS_DIR / "final_test_metrics.json", final_test_report)
-    save_json(REPORTS_DIR / "failure_mode_analysis.json", failure_slices)
+    for report_path, report in (
+        (REPORTS_DIR / "final_test_metrics.json", final_test_report),
+        (REPORTS_DIR / "failure_mode_analysis.json", failure_slices),
+        (REPORTS_DIR / "twf_error_analysis.json", twf_error_analysis),
+        (REPORTS_DIR / "test_metrics.json", final_test_report),
+    ):
+        try:
+            save_json(report_path, report)
+        except PermissionError:
+            LOGGER.warning("Bỏ qua báo cáo legacy bị khóa: %s", report_path)
 
-    # Lưu test_metrics.json cho tính tương thích ngược
-    save_json(REPORTS_DIR / "test_metrics.json", final_test_report)
+    # Cập nhật locked_test_metrics trong release sau khi đã đánh giá; không thay đổi policy.
+    release_dir = find_latest_release()
+    if release_dir is not None:
+        save_json(release_dir / "locked_test_metrics.json", final_test_report)
+        manifest_path = release_dir / "manifest.json"
+        release_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        release_manifest["file_hashes"] = {
+            path.name: sha256_file(path)
+            for path in release_dir.iterdir()
+            if path.is_file() and path.name != "manifest.json"
+        }
+        release_manifest["model_sha256"] = release_manifest["file_hashes"]["model.joblib"]
+        release_manifest["feature_contract_sha256"] = release_manifest["file_hashes"]["feature_contract.json"]
+        release_manifest["policy_sha256"] = release_manifest["file_hashes"]["decision_policy.json"]
+        release_manifest["reference_distribution_sha256"] = release_manifest["file_hashes"]["reference_distribution.json"]
+        save_json(manifest_path, release_manifest)
 
     LOGGER.info("=== KẾT QUẢ ĐÁNH GIÁ TRÊN TẬP TEST ĐỘC LẬP ===")
     LOGGER.info(

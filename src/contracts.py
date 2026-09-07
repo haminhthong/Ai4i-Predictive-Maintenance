@@ -1,7 +1,7 @@
-"""Định nghĩa hợp đồng dữ liệu (Data Contracts), lược đồ canonical và ranh giới chống rò rỉ (Leakage Boundary).
+"""Hợp đồng dữ liệu dùng chung cho toàn bộ hệ thống.
 
-Tất cả các thành phần trong hệ thống (Data Ingestion, Feature Engineering, Training,
-Evaluation, Inference, API) đều phải tuân thủ các quy chuẩn đặt tên và cấu trúc trong module này.
+`quality_type` là đặc trưng chất lượng sản phẩm của AI4I, không phải định danh máy.
+Định danh tài sản và thời gian sự kiện chỉ thuộc hợp đồng runtime, không đi vào mô hình.
 """
 
 from __future__ import annotations
@@ -17,6 +17,9 @@ RAW_TO_CANONICAL_COLUMN_MAP: Final[dict[str, str]] = {
     "UDI": "udi",
     "Product ID": "product_id",
     "Type": "quality_type",
+    "product_quality_type": "quality_type",
+    "product_type": "quality_type",
+    "machine_type": "quality_type",
     "Air temperature [K]": "air_temperature_k",
     "Air temperature": "air_temperature_k",
     "Process temperature [K]": "process_temperature_k",
@@ -97,3 +100,17 @@ NUMERIC_FEATURES: Final[tuple[str, ...]] = tuple(
 
 # Giá trị phân loại hợp lệ của quality_type
 VALID_QUALITY_TYPES: Final[frozenset[str]] = frozenset({"L", "M", "H"})
+
+# Các trường metadata được dùng để ghi log, theo dõi và xếp hàng bảo trì.
+# Chúng không được đưa vào MODEL_FEATURE_CONTRACT.
+RUNTIME_METADATA_FIELDS: Final[tuple[str, ...]] = (
+    "event_id",
+    "asset_id",
+    "event_time",
+    "line_id",
+    "sensor_source",
+    "shift",
+)
+
+# Tên public của trường phân loại sản phẩm trong API.
+PUBLIC_PRODUCT_TYPE_FIELD: Final[str] = "product_quality_type"
