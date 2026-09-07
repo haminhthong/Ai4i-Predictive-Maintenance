@@ -1,12 +1,12 @@
-"""Module đánh giá độc lập mô hình trên tập Test (Hold-out Test Set).
+"""Module đánh giá độc lập trên tập Locked Test (Hold-out Test Set).
 
-Module thực hiện các bước:
-1. Nạp dữ liệu tập Test hoàn toàn độc lập (20% dữ liệu chưa từng thấy).
-2. Tải mô hình đã huấn luyện (model.joblib) và cấu hình ngưỡng quyết định (config.json).
-3. Đánh giá toàn diện các chỉ số phân loại: PR-AUC, ROC-AUC, Precision, Recall, F1-Score, Brier Score, ECE, Alert Rate và Confusion Matrix.
-4. Tính toán **Test Expected Business Cost** (FN*5 + FP*1) và quy đổi chi phí trên 1.000 thiết bị.
-5. Thực hiện **Ablation Study** so sánh 3 chiến lược threshold (Mặc định 0.5 vs. Max F1 vs. Cost-Sensitive Tuned).
-6. Xuất kết quả chi tiết ra tệp `reports/test_metrics.json`.
+NGUYÊN TẮC VÀNG TRONG EVALUATION (ZERO LEAKAGE ORACLE PROTOCOL):
+1. Không thực hiện bất kỳ tối ưu hóa hay tìm kiếm ngưỡng (Grid-search/Argmax) nào trên tập Test.
+2. Nạp toàn bộ các ngưỡng quyết định ĐÃ ĐƯỢC ĐÓNG BĂNG từ `decision_policy.json` (huấn luyện trên Validation).
+3. Đánh giá toàn diện các chỉ số: PR-AUC, ROC-AUC, Precision, Recall, F1, Brier, ECE, Alert Rate.
+4. Đánh giá đa kịch bản (Threshold Ablation Study & Capacity Constraints).
+5. Phân tích lát cắt theo từng cơ chế hỏng hóc (Failure-Mode Slices: TWF, HDF, PWF, OSF, RNF) và giải phẫu FN/FP.
+6. Tính toán Weighted Decision Cost (Chi phí trọng số) - tuyệt đối không gán đơn vị tiền tệ $ khi chưa có case study.
 """
 
 from __future__ import annotations
@@ -17,192 +17,246 @@ from typing import Any
 
 import joblib
 import numpy as np
-from sklearn.calibration import calibration_curve
-from sklearn.metrics import (
-    average_precision_score,
-    brier_score_loss,
-    confusion_matrix,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
+import pandas as pd
 
+from .contracts import FAILURE_MODE_COLUMNS, FAILURE_MODE_DESCRIPTIONS
 from .data import load_data
-from .utils import LOGGER, save_json
+from .models import compute_calibration_curve_and_ece, compute_classification_metrics
+from .utils import LOGGER, save_json, setup_logging
+
+ARTIFACTS_DIR = Path("artifacts/champion")
+MODELS_DIR = Path("models")
+REPORTS_DIR = Path("reports")
 
 
-def compute_expected_calibration_error(
-    y_true: np.ndarray, y_prob: np.ndarray, n_bins: int = 10
-) -> tuple[float, list[dict[str, float]]]:
-    """Tính toán Expected Calibration Error (ECE) và chi tiết các điểm dữ liệu Calibration Curve."""
-    prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="uniform")
-    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
-    ece = 0.0
-    total_samples = len(y_true)
-    curve_points: list[dict[str, float]] = []
+def load_frozen_artifacts() -> tuple[Any, dict[str, Any], dict[str, Any]]:
+    """Nạp mô hình và chính sách quyết định đã đóng băng từ thư mục artifacts hoặc models."""
+    model_path = ARTIFACTS_DIR / "model.joblib"
+    if not model_path.exists():
+        model_path = MODELS_DIR / "model.joblib"
 
-    for i in range(n_bins):
-        bin_mask = (y_prob >= bin_edges[i]) & (y_prob < bin_edges[i + 1])
-        bin_size = np.sum(bin_mask)
-        if bin_size > 0:
-            bin_acc = np.mean(y_true[bin_mask])
-            bin_conf = np.mean(y_prob[bin_mask])
-            ece += (bin_size / total_samples) * abs(bin_acc - bin_conf)
-            curve_points.append(
-                {
-                    "bin_lower": float(bin_edges[i]),
-                    "bin_upper": float(bin_edges[i + 1]),
-                    "count": int(bin_size),
-                    "mean_predicted": float(bin_conf),
-                    "fraction_of_positives": float(bin_acc),
-                }
+    policy_path = ARTIFACTS_DIR / "decision_policy.json"
+    manifest_path = ARTIFACTS_DIR / "model_manifest.json"
+
+    if not model_path.exists() or not policy_path.exists():
+        # Fallback đọc từ models/config.json nếu artifacts chưa có
+        config_path = MODELS_DIR / "config.json"
+        if not config_path.exists():
+            raise FileNotFoundError(
+                "Không tìm thấy mô hình hoặc chính sách đã huấn luyện. "
+                "Vui lòng chạy `python -m src.train` trước khi thực hiện đánh giá."
             )
-
-    return float(ece), curve_points
-
-
-def evaluate_threshold_strategy(
-    y_true: np.ndarray,
-    y_prob: np.ndarray,
-    threshold: float,
-    fn_cost: float = 5.0,
-    fp_cost: float = 1.0,
-) -> dict[str, float]:
-    """Tính toán bộ metric đầy đủ cho một ngưỡng quyết định cụ thể."""
-    y_pred = (y_prob >= threshold).astype(int)
-    cm = confusion_matrix(y_true, y_pred)
-    tn, fp, fn, tp = cm.ravel()
-
-    expected_cost = float(fn * fn_cost + fp * fp_cost)
-    cost_per_1000 = float((expected_cost / len(y_true)) * 1000.0)
-
-    return {
-        "threshold": float(threshold),
-        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
-        "alert_rate": float(y_pred.mean()),
-        "false_negatives": int(fn),
-        "false_positives": int(fp),
-        "true_positives": int(tp),
-        "true_negatives": int(tn),
-        "expected_cost": expected_cost,
-        "cost_per_1000_machines": cost_per_1000,
-    }
-
-
-def evaluate_model_on_test() -> dict[str, Any]:
-    """Đánh giá mô hình đã lưu trên tập Test độc lập.
-
-    Returns:
-        dict[str, Any]: Từ điển chứa tất cả chỉ số đánh giá kỹ thuật, hiệu chỉnh xác suất và chi phí kinh doanh.
-    """
-    LOGGER.info("Bắt đầu quy trình đánh giá mô hình trên tập Test độc lập...")
-
-    # 1. Nạp tập dữ liệu Test (Hold-out test split)
-    _, _, X_test, _, _, y_test = load_data()
-    y_test_arr = y_test.to_numpy()
-
-    # 2. Kiểm tra tệp mô hình và tệp cấu hình
-    model_path = Path("models/model.joblib")
-    config_path = Path("models/config.json")
-
-    if not model_path.exists() or not config_path.exists():
-        raise FileNotFoundError(
-            "Không tìm thấy mô hình hoặc tệp cấu hình! "
-            "Vui lòng chạy `python -m src.train` trước khi đánh giá."
-        )
+        cfg = json.loads(config_path.read_text(encoding="utf-8"))
+        model = joblib.load(model_path)
+        policy = cfg.get("decision_policy", {})
+        manifest = {
+            "model_version": cfg.get("version", "v2"),
+            "model_type": cfg.get("selected_model", "unknown"),
+        }
+        return model, policy, manifest
 
     model = joblib.load(model_path)
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    return model, policy, manifest
 
-    tuned_threshold = float(config.get("threshold", 0.5))
-    fn_cost = float(config.get("false_negative_cost", 5.0))
-    fp_cost = float(config.get("false_positive_cost", 1.0))
-    LOGGER.info(f"Áp dụng ngưỡng quyết định tối ưu từ config: {tuned_threshold:.4f}")
 
-    # 3. Tính toán xác suất dự báo rủi ro hỏng máy
+def evaluate_failure_mode_slices(
+    modes_df: pd.DataFrame,
+    y_test: np.ndarray,
+    test_preds: np.ndarray,
+) -> dict[str, Any]:
+    """Phân tích lát cắt khả năng phát hiện lỗi của mô hình theo từng cơ chế hỏng hóc (Failure Modes).
+
+    LƯU Ý: modes_df chứa các cờ hậu nghiệm (TWF, HDF, PWF, OSF, RNF) hoàn toàn được cô lập làm Evaluation Metadata,
+    không tham gia vào bất kỳ khâu tính toán đặc trưng hay dự báo nào.
+    """
+    slices_report: dict[str, Any] = {}
+
+    for mode_col in FAILURE_MODE_COLUMNS:
+        if mode_col not in modes_df.columns:
+            continue
+
+        mode_mask = modes_df[mode_col].to_numpy().astype(int) == 1
+        total_mode_failures = int(np.sum(mode_mask))
+
+        if total_mode_failures > 0:
+            detected = int(np.sum(test_preds[mode_mask]))
+            recall_rate = float(detected / total_mode_failures)
+        else:
+            detected = 0
+            recall_rate = 0.0
+
+        slices_report[mode_col] = {
+            "description": FAILURE_MODE_DESCRIPTIONS.get(mode_col, mode_col),
+            "total_test_failures": total_mode_failures,
+            "detected_by_policy": detected,
+            "missed_by_policy": total_mode_failures - detected,
+            "detection_recall": recall_rate,
+            "detection_percentage": f"{recall_rate * 100:.2f}%",
+        }
+
+    return slices_report
+
+
+def analyze_false_negatives_and_positives(
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    y_prob: np.ndarray,
+    test_preds: np.ndarray,
+    modes_df: pd.DataFrame,
+) -> dict[str, Any]:
+    """Phân tích chi tiết các ca bỏ sót (False Negatives) và cảnh báo nhầm (False Positives)."""
+    fn_mask = (y_test == 1) & (test_preds == 0)
+    fp_mask = (y_test == 0) & (test_preds == 1)
+
+    fn_count = int(np.sum(fn_mask))
+    fp_count = int(np.sum(fp_mask))
+
+    fn_modes: dict[str, int] = {}
+    for col in FAILURE_MODE_COLUMNS:
+        if col in modes_df.columns:
+            fn_modes[col] = int(np.sum(modes_df.loc[fn_mask, col].to_numpy().astype(int) == 1))
+
+    # Tóm tắt đặc trưng của các ca FN
+    fn_features_summary = {}
+    if fn_count > 0:
+        fn_df = X_test[fn_mask]
+        for col in ["torque_nm", "tool_wear_min", "rotational_speed_rpm", "temperature_delta_k"]:
+            if col in fn_df.columns:
+                fn_features_summary[col] = {
+                    "mean": float(fn_df[col].mean()),
+                    "min": float(fn_df[col].min()),
+                    "max": float(fn_df[col].max()),
+                }
+
+    return {
+        "false_negatives_count": fn_count,
+        "false_positives_count": fp_count,
+        "false_negatives_by_failure_mode": fn_modes,
+        "false_negatives_feature_summary": fn_features_summary,
+    }
+
+
+def evaluate_model_on_locked_test() -> dict[str, Any]:
+    """Đánh giá mô hình đã đóng băng trên tập Locked Hold-out Test hoàn toàn độc lập."""
+    LOGGER.info("=== BẮT ĐẦU ĐÁNH GIÁ TRÊN TẬP LOCKED TEST (HOLD-OUT) ===")
+
+    # 1. Nạp dữ liệu tập Test kèm metadata phân tích lỗi (20% dữ liệu)
+    _, _, X_test, _, _, y_test, modes_test = load_data(return_metadata=True)
+    y_test_arr = y_test.to_numpy()
+    LOGGER.info(f"Tập Test độc lập gồm {len(X_test)} mẫu ({int(np.sum(y_test_arr))} ca hỏng máy).")
+
+    # 2. Nạp mô hình và chính sách quyết định đã đóng băng
+    model, policy, manifest = load_frozen_artifacts()
+    frozen_thresholds = policy.get("frozen_thresholds", {})
+    cost_weights = policy.get("cost_weights", {"false_negative": 5.0, "false_positive": 1.0})
+    fn_w = float(cost_weights.get("false_negative", 5.0))
+    fp_w = float(cost_weights.get("false_positive", 1.0))
+
+    primary_thresh = float(policy.get("primary_alert_threshold", 0.3574))
+    LOGGER.info(f"Áp dụng ngưỡng quyết định tối ưu đã đóng băng từ Validation: {primary_thresh:.4f}")
+
+    # 3. Tính toán xác suất dự báo rủi ro
     y_probs = model.predict_proba(X_test)[:, 1]
 
-    # 4. Tính toán các metric kỹ thuật cốt lõi
-    pr_auc_val = float(average_precision_score(y_test_arr, y_probs))
-    roc_auc_val = float(roc_auc_score(y_test_arr, y_probs))
-    brier_val = float(brier_score_loss(y_test_arr, y_probs))
-    ece_val, calibration_curve_points = compute_expected_calibration_error(y_test_arr, y_probs)
+    # 4. Tính toán độ hiệu chuẩn xác suất (Calibration Curve & ECE)
+    ece_val, calib_points = compute_calibration_curve_and_ece(y_test_arr, y_probs)
 
-    # 5. Thực hiện Threshold Strategy Ablation Study trên Test Set
-    # Tìm ngưỡng Max F1 trên tập test để làm đối chứng
-    candidate_thresholds = np.unique(np.r_[0.0, y_probs, 1.0])
-    f1_scores = [
-        f1_score(y_test_arr, (y_probs >= t).astype(int), zero_division=0)
-        for t in candidate_thresholds
-    ]
-    max_f1_thresh = float(candidate_thresholds[np.argmax(f1_scores)])
-
-    ablation_study = {
-        "fixed_0_50": evaluate_threshold_strategy(
-            y_test_arr, y_probs, 0.50, fn_cost, fp_cost
-        ),
-        "max_f1_strategy": evaluate_threshold_strategy(
-            y_test_arr, y_probs, max_f1_thresh, fn_cost, fp_cost
-        ),
-        "cost_sensitive_tuned": evaluate_threshold_strategy(
-            y_test_arr, y_probs, tuned_threshold, fn_cost, fp_cost
-        ),
+    # 5. Đánh giá đa chiến lược ngưỡng (Threshold Ablation Study) TRÊN TEST
+    # LƯU Ý: Tất cả các ngưỡng đều được lấy từ frozen_thresholds, TUYỆT ĐỐI KHÔNG TỐI ƯU TRÊN TEST!
+    threshold_candidates = {
+        "fixed_0_50": frozen_thresholds.get("fixed_0_50", 0.50),
+        "max_f1_validation_tuned": frozen_thresholds.get("max_f1_validation", 0.3965),
+        "cost_sensitive_validation_tuned": primary_thresh,
+        "capacity_constrained_5pct": frozen_thresholds.get("capacity_constrained_5pct", primary_thresh),
+        "capacity_constrained_3pct": frozen_thresholds.get("capacity_constrained_3pct", primary_thresh),
+        "capacity_constrained_2pct": frozen_thresholds.get("capacity_constrained_2pct", primary_thresh),
     }
 
-    primary_eval = ablation_study["cost_sensitive_tuned"]
+    ablation_study: dict[str, Any] = {}
+    for name, thresh in threshold_candidates.items():
+        metrics = compute_classification_metrics(
+            y_test_arr, y_probs, threshold=thresh, fn_weight=fn_w, fp_weight=fp_w
+        )
+        ablation_study[name] = metrics
 
-    test_metrics = {
-        "model_version": config.get("version", "v2"),
-        "feature_contract_version": config.get("feature_contract_version", "v2"),
-        "selected_model": config.get("selected_model", "unknown"),
-        "threshold": tuned_threshold,
-        "pr_auc": pr_auc_val,
-        "roc_auc": roc_auc_val,
-        "precision": primary_eval["precision"],
-        "recall": primary_eval["recall"],
-        "f1": primary_eval["f1"],
-        "brier": brier_val,
-        "ece": ece_val,
-        "alert_rate": primary_eval["alert_rate"],
-        "expected_business_cost": primary_eval["expected_cost"],
-        "cost_per_1000_machines": primary_eval["cost_per_1000_machines"],
-        "confusion_matrix": [
-            [primary_eval["true_negatives"], primary_eval["false_positives"]],
-            [primary_eval["false_negatives"], primary_eval["true_positives"]],
-        ],
+    # 6. Đánh giá chính sách chính (Cost-sensitive tuned)
+    primary_metrics = ablation_study["cost_sensitive_validation_tuned"]
+    test_preds = (y_probs >= primary_thresh).astype(int)
+
+    # 7. Phân tích lát cắt theo từng cơ chế hỏng hóc (Failure-Mode Slices)
+    failure_slices = evaluate_failure_mode_slices(modes_test, y_test_arr, test_preds)
+
+    # 8. Phân tích lỗi các ca FN và FP
+    error_analysis = analyze_false_negatives_and_positives(
+        X_test, y_test_arr, y_probs, test_preds, modes_test
+    )
+
+    # 9. Tổng hợp kết quả báo cáo
+    final_test_report = {
+        "model_version": manifest.get("model_version", "v2"),
+        "model_type": manifest.get("model_type", "calibrated_model"),
+        "evaluation_protocol": "locked_holdout_test_zero_leakage",
+        "total_test_samples": len(X_test),
+        "total_test_failures": int(np.sum(y_test_arr)),
+        "primary_policy": {
+            "policy_version": policy.get("policy_version", "maintenance-policy-v2"),
+            "alert_threshold": primary_thresh,
+            "critical_threshold": policy.get("critical_threshold", 0.75),
+            "cost_scenario": f"FN{fn_w:.0f}_FP{fp_w:.0f}",
+            "cost_unit": "relative_cost_units",
+        },
+        "test_performance": {
+            "pr_auc": primary_metrics["pr_auc"],
+            "roc_auc": primary_metrics["roc_auc"],
+            "precision": primary_metrics["precision"],
+            "recall": primary_metrics["recall"],
+            "f1_score": primary_metrics["f1"],
+            "brier_score": primary_metrics["brier"],
+            "ece": ece_val,
+            "alert_rate": primary_metrics["alert_rate"],
+            "weighted_decision_cost": primary_metrics["weighted_cost"],
+            "cost_units_per_1000_observations": primary_metrics["cost_units_per_1000"],
+            "confusion_matrix": primary_metrics["confusion_matrix"],
+        },
         "threshold_ablation_study": ablation_study,
-        "calibration_curve": calibration_curve_points,
+        "failure_mode_analysis": failure_slices,
+        "error_analysis_fn_fp": error_analysis,
+        "calibration_curve": calib_points,
     }
 
-    # 6. Lưu báo cáo đánh giá vào tập tin JSON
-    reports_path = Path("reports/test_metrics.json")
-    save_json(reports_path, test_metrics)
+    # 10. Lưu các báo cáo chi tiết
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    save_json(REPORTS_DIR / "final_test_metrics.json", final_test_report)
+    save_json(REPORTS_DIR / "failure_mode_analysis.json", failure_slices)
+
+    # Lưu test_metrics.json cho tính tương thích ngược
+    save_json(REPORTS_DIR / "test_metrics.json", final_test_report)
 
     LOGGER.info("=== KẾT QUẢ ĐÁNH GIÁ TRÊN TẬP TEST ĐỘC LẬP ===")
-    LOGGER.info(f"Model: {config.get('selected_model')} | Version: {config.get('version')}")
-    LOGGER.info(f"PR-AUC: {pr_auc_val:.4f} | ROC-AUC: {roc_auc_val:.4f}")
     LOGGER.info(
-        f"Precision: {primary_eval['precision']:.4f} | Recall: {primary_eval['recall']:.4f} | F1: {primary_eval['f1']:.4f}"
+        f"PR-AUC: {primary_metrics['pr_auc']:.4f} | ROC-AUC: {primary_metrics['roc_auc']:.4f} | "
+        f"Brier: {primary_metrics['brier']:.4f} | ECE: {ece_val:.4f}"
     )
-    LOGGER.info(f"Brier Score: {brier_val:.4f} | ECE: {ece_val:.4f} | Alert Rate: {primary_eval['alert_rate']:.4%}")
     LOGGER.info(
-        f"Expected Business Cost (FN*5 + FP*1): {primary_eval['expected_cost']:.2f} "
-        f"({primary_eval['cost_per_1000_machines']:.2f} per 1,000 machines)"
+        f"Precision: {primary_metrics['precision']:.4f} | Recall: {primary_metrics['recall']:.4f} | "
+        f"F1: {primary_metrics['f1']:.4f} | Alert Rate: {primary_metrics['alert_rate']:.2%}"
     )
-    LOGGER.info("Ablation Study (Cost-Sensitive vs 0.50 vs Max F1):")
-    for strat, res in ablation_study.items():
+    LOGGER.info(
+        f"Weighted Decision Cost: {primary_metrics['weighted_cost']:.2f} cost units "
+        f"({primary_metrics['cost_units_per_1000']:.2f} cost units / 1,000 observations)"
+    )
+    LOGGER.info("Phân tích cơ chế hỏng hóc (Failure Mode Recall):")
+    for mode, data in failure_slices.items():
         LOGGER.info(
-            f"  - {strat:20s} | Thresh: {res['threshold']:.4f} | Recall: {res['recall']:.4f} | "
-            f"Alert Rate: {res['alert_rate']:.4%} | Cost/1k: ${res['cost_per_1000_machines']:.2f}"
+            f"  - {mode:12s}: {data['detected_by_policy']}/{data['total_test_failures']} phát hiện "
+            f"({data['detection_percentage']})"
         )
 
-    return test_metrics
+    return final_test_report
 
 
 if __name__ == "__main__":
-    metrics = evaluate_model_on_test()
-    LOGGER.info(json.dumps(metrics, indent=2, ensure_ascii=True))
-
+    setup_logging()
+    evaluate_model_on_locked_test()

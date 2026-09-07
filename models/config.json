@@ -1,30 +1,51 @@
 {
   "schema_version": 2,
-  "version": "ai4i-20260905-9b01f38",
-  "feature_contract_version": "ai4i-features-v2",
+  "version": "ai4i-20260907-9b01f38",
+  "feature_contract_version": "ai4i-canonical-v2",
   "data_sha256": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
   "selected_model": "rf_sigmoid_calibrated",
   "threshold": 0.3574360713649883,
+  "critical_threshold": 0.4871633972629153,
   "false_negative_cost": 5.0,
   "false_positive_cost": 1.0,
   "seed": 42,
   "features": [
-    "Type",
-    "Air temperature",
-    "Process temperature",
-    "Rotational speed",
-    "Torque",
-    "Tool wear",
-    "temperature_delta",
-    "mechanical_power",
+    "quality_type",
+    "air_temperature_k",
+    "process_temperature_k",
+    "rotational_speed_rpm",
+    "torque_nm",
+    "tool_wear_min",
+    "temperature_delta_k",
+    "mechanical_power_w",
     "wear_load_interaction"
   ],
+  "decision_policy": {
+    "policy_version": "maintenance-policy-v2",
+    "selected_on": "validation_set",
+    "cost_weights": {
+      "false_negative": 5.0,
+      "false_positive": 1.0,
+      "unit": "relative_cost_units"
+    },
+    "primary_alert_threshold": 0.3574360713649883,
+    "critical_threshold": 0.4871633972629153,
+    "frozen_thresholds": {
+      "fixed_0_50": 0.5,
+      "max_f1_validation": 0.3574360713649883,
+      "cost_sensitive_validation": 0.3574360713649883,
+      "capacity_constrained_5pct": 0.3574360713649883,
+      "capacity_constrained_3pct": 0.45953136943607853,
+      "capacity_constrained_2pct": 0.8457646437346248
+    },
+    "validation_expected_cost": 56.0
+  },
   "split_contract": {
     "method": "stratified_random",
     "train_fraction": 0.64,
     "validation_fraction": 0.16,
     "test_fraction": 0.2,
-    "limitation": "Dataset không có chuỗi thời gian/machine history đủ để group-time split hay forecast RUL."
+    "limitation": "Snapshot risk classification; không dự báo RUL do thiếu chuỗi thời gian liên tục."
   },
   "runtime": {
     "python": "3.13.14",

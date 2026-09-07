@@ -1,0 +1,1 @@
+"""Package `tests`: Bộ kiểm thử tự động (smoke test + regression test)."""

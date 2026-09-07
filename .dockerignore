@@ -1,11 +1,59 @@
+# ============================================================================
+# Docker build context exclusions (khi COPY . .)
+# ============================================================================
 .git
 .github
-.venv
+.gitignore
+.gitattributes
+
+# IDE & editor
+.idea
+.vscode
+.cursor
+.cursorignore
+.cursorindexingignore
+
+# Python cache & test artifacts
 __pycache__
 **/__pycache__
-.pytest_cache
-tests
-reports
-data
 *.pyc
+*.pyo
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+.coverage.*
+*.cover
+
+# Virtual envs
+.venv
+venv
+env
+ENV
+
+# Tests (không cần trong runtime image)
+tests
+tests/**
+test_*.py
+
+# Dữ liệu thô - sẽ tải lại trong builder stage
+data/raw/*.csv
+
+# Reports - sẽ tái sinh khi cần
+reports/*.json
+
+# Secrets & env files
+.env
+.env.*
+!.env.example
+
+# Logs
 *.log
+logs/
+
+# Misc
+README.md
+RESEARCH_REPORT.md
+LICENSE
+*.md

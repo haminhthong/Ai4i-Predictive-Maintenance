@@ -1,0 +1,41 @@
+# Configuration for AI4I Machine Failure Risk Model Development Pipeline
+model_development:
+  seed: 42
+  data:
+    raw_path: "data/raw/ai4i2020.csv"
+    split_manifest: "reports/split_manifest.json"
+    audit_report: "reports/data_audit.json"
+    fractions:
+      train: 0.64
+      validation: 0.16
+      test: 0.20
+
+  feature_contract:
+    version: "ai4i-canonical-v2"
+    categorical:
+      - quality_type
+    numeric:
+      - air_temperature_k
+      - process_temperature_k
+      - rotational_speed_rpm
+      - torque_nm
+      - tool_wear_min
+      - temperature_delta_k
+      - mechanical_power_w
+      - wear_load_interaction
+
+  model_zoo:
+    candidates:
+      - logistic_baseline
+      - logistic_sigmoid_calibrated
+      - random_forest_baseline
+      - rf_sigmoid_calibrated
+      - hist_gb_baseline
+      - hist_gb_sigmoid_calibrated
+
+  champion_selection:
+    primary_metric: "pr_auc"
+    secondary_metric: "brier_score"
+    pr_auc_tolerance: 0.01
+
+  artifacts_destination: "artifacts/champion"

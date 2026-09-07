@@ -1,19 +1,17 @@
-"""Module xử lý dữ liệu và tạo đặc trưng (Feature Engineering) cho bài toán Machine Failure Risk.
+"""Tầng dữ liệu (Data Layer): Nạp dữ liệu thô, Kiểm toán (Audit), Phân tách và Đăng ký Split Registry.
 
-Module này thực hiện các nhiệm vụ chính trong pipeline canonical:
-1. Nạp dữ liệu thô AI4I 2020 từ tệp CSV và tính checksum SHA256.
-2. Loại bỏ các cột gây rò rỉ dữ liệu (Data Leakage: TWF, HDF, PWF, OSF, RNF) và định danh (UDI, Product ID).
-3. Tạo các đặc trưng vật lý bổ sung (Engineered Features) dựa trên cơ học & nhiệt động lực học chuẩn:
-   - `temperature_delta`: Chênh lệch nhiệt độ vận hành và không khí.
-   - `mechanical_power`: Công suất cơ học thực tế (Watts: Torque * angular_velocity).
-   - `wear_load_interaction`: Tương tác tải trọng mòn công cụ (Tool wear x Torque).
-4. Phân chia dữ liệu phân tầng (Stratified Random Split): Train 64%, Validation 16%, Test 20%.
-5. Trích xuất khoảng phân bố (Quantile bounds P0.5 - P99.5) phục vụ giám sát OOD tại API.
+Quy trình quản lý dữ liệu:
+1. `load_raw_dataset()`: Nạp tệp CSV thô từ `data/raw/ai4i2020.csv`.
+2. `audit_dataset()`: Kiểm tra tính toàn vẹn, thiếu sót, trùng lặp và phân bố tỷ lệ lỗi.
+3. `create_or_load_split_registry()`: Lưu trữ hoặc nạp chỉ số phân tầng (Split Registry) cố định.
+4. `load_data()`: Trả về tập dữ liệu Train / Val / Locked Test chuẩn hóa features,
+   tách biệt hoàn toàn nhãn mục tiêu và metadata chế độ lỗi (Failure modes).
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +19,18 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-# Các tên cột nhãn mục tiêu có thể xuất hiện trong dataset AI4I 2020
-TARGET_CANDIDATES = ["Machine failure", "Machine failure ", "machine_failure"]
+from .contracts import (
+    FAILURE_MODE_COLUMNS,
+    IDENTIFIER_COLUMNS,
+    MODEL_FEATURE_CONTRACT,
+    TARGET_COLUMN,
+)
+from .features import build_canonical_features, canonicalize_raw_dataframe
+from .utils import LOGGER, save_json
+
+DEFAULT_RAW_DATA_PATH = Path("data/raw/ai4i2020.csv")
+DEFAULT_SPLIT_MANIFEST_PATH = Path("reports/split_manifest.json")
+DEFAULT_AUDIT_REPORT_PATH = Path("reports/data_audit.json")
 
 
 def compute_dataset_sha256(path: str | Path) -> str:
@@ -37,57 +45,160 @@ def compute_dataset_sha256(path: str | Path) -> str:
     return hasher.hexdigest()
 
 
-def add_engineered_features(features: pd.DataFrame) -> pd.DataFrame:
-    """Tạo thêm các đặc trưng vật lý biểu diễn trạng thái hoạt động của máy móc.
+def load_raw_dataset(path: str | Path = DEFAULT_RAW_DATA_PATH) -> pd.DataFrame:
+    """Nạp tệp dữ liệu CSV thô từ đĩa.
 
-    Lưu ý: Chỉ sử dụng các thông số cảm biến thu thập tại thời điểm suy luận (Inference snapshot),
-    không sử dụng bất kỳ nhãn hậu nghiệm nào để tránh Data Leakage.
-
-    Các đặc trưng được tạo:
-    - `temperature_delta`: Độ chênh lệch nhiệt độ giữa quá trình vận hành và không khí (K).
-    - `mechanical_power`: Công suất cơ học thực tính bằng Watts (P = Torque * angular_velocity, rad/s).
-    - `wear_load_interaction`: Tải trọng ma sát tích lũy (Độ mòn x Mô-men xoắn, min*Nm).
-
-    Args:
-        features (pd.DataFrame): Dataframe chứa thông số cảm biến ban đầu.
-
-    Returns:
-        pd.DataFrame: Dataframe đã bổ sung 3 đặc trưng vật lý mới.
+    Raises:
+        FileNotFoundError: Nếu tệp CSV chưa tồn tại.
     """
-    df = features.copy()
-
-    def get_column_by_prefix(prefix: str) -> str:
-        """Tìm chính xác tên cột trong dataframe dựa trên tiền tố không phân biệt chữ hoa/thường."""
-        matched = next(
-            (col for col in df.columns if col.lower().startswith(prefix.lower())),
-            None,
+    csv_path = Path(path)
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            f"Không tìm thấy tệp dữ liệu tại '{csv_path}'. "
+            f"Vui lòng chạy `python scripts/download_data.py` trước khi tiếp tục."
         )
-        if matched is None:
-            raise KeyError(f"Không tìm thấy cột cảm biến chứa tiền tố: '{prefix}'")
-        return matched
+    return pd.read_csv(csv_path)
 
-    air_temp_col = get_column_by_prefix("air temperature")
-    proc_temp_col = get_column_by_prefix("process temperature")
-    speed_col = get_column_by_prefix("rotational speed")
-    torque_col = get_column_by_prefix("torque")
-    wear_col = get_column_by_prefix("tool wear")
 
-    # 1. Chênh lệch nhiệt độ (Thermal Delta - Kelvin)
-    df["temperature_delta"] = df[proc_temp_col] - df[air_temp_col]
+def audit_dataset(
+    df: pd.DataFrame,
+    sha256_hash: str | None = None,
+    save_path: str | Path | None = DEFAULT_AUDIT_REPORT_PATH,
+) -> dict[str, Any]:
+    """Kiểm toán toàn diện bộ dữ liệu AI4I 2020: kiểm tra schema, missing, duplicates, prevalence."""
+    clean_df = canonicalize_raw_dataframe(df)
 
-    # 2. Công suất cơ học thực tế (Mechanical Power in Watts: P = Tau * Omega)
-    # Omega (rad/s) = RPM * 2*pi / 60
-    angular_velocity = df[speed_col] * (2.0 * np.pi / 60.0)
-    df["mechanical_power"] = df[torque_col] * angular_velocity
+    total_rows = int(len(clean_df))
+    duplicate_rows = int(clean_df.duplicated().sum())
+    missing_counts = {str(k): int(v) for k, v in clean_df.isnull().sum().items() if v > 0}
 
-    # 3. Tải trọng tương tác mòn công cụ (Wear-Load Interaction: min * Nm)
-    df["wear_load_interaction"] = df[wear_col] * df[torque_col]
+    # Đếm số lượng máy hỏng và tỷ lệ mắc (Prevalence)
+    if TARGET_COLUMN in clean_df.columns:
+        target_series = clean_df[TARGET_COLUMN].astype(int)
+        failure_count = int(target_series.sum())
+        normal_count = total_rows - failure_count
+        prevalence = float(target_series.mean())
+    else:
+        failure_count = 0
+        normal_count = total_rows
+        prevalence = 0.0
 
-    return df
+    # Thống kê phân bố các failure mode hậu nghiệm
+    failure_modes_summary: dict[str, int] = {}
+    for col in FAILURE_MODE_COLUMNS:
+        if col in clean_df.columns:
+            failure_modes_summary[col] = int(clean_df[col].astype(int).sum())
+
+    # Kiểm tra dải giá trị cảm biến cơ bản
+    feature_ranges: dict[str, dict[str, float]] = {}
+    numeric_cols = clean_df.select_dtypes(include=[np.number]).columns
+    for c in numeric_cols:
+        s = clean_df[c].dropna()
+        feature_ranges[c] = {
+            "min": float(s.min()),
+            "max": float(s.max()),
+            "mean": float(s.mean()),
+            "std": float(s.std()),
+        }
+
+    audit_report = {
+        "dataset_name": "AI4I 2020 Predictive Maintenance Dataset",
+        "total_observations": total_rows,
+        "duplicate_rows": duplicate_rows,
+        "missing_values_count": missing_counts,
+        "has_missing_values": len(missing_counts) > 0,
+        "raw_sha256": sha256_hash or "unknown",
+        "target_column": TARGET_COLUMN,
+        "target_summary": {
+            "failure_samples": failure_count,
+            "normal_samples": normal_count,
+            "prevalence_rate": prevalence,
+            "prevalence_percentage": f"{prevalence * 100:.2f}%",
+        },
+        "latent_failure_modes_count": failure_modes_summary,
+        "feature_ranges_raw": feature_ranges,
+        "leakage_isolation": {
+            "identifier_columns_dropped": list(IDENTIFIER_COLUMNS),
+            "failure_modes_quarantined_for_eval_only": list(FAILURE_MODE_COLUMNS),
+        },
+    }
+
+    if save_path is not None:
+        save_json(save_path, audit_report)
+        LOGGER.info(f"Đã lưu báo cáo Data Audit tại: {save_path}")
+
+    return audit_report
+
+
+def create_or_load_split_registry(
+    df: pd.DataFrame,
+    seed: int = 42,
+    manifest_path: str | Path = DEFAULT_SPLIT_MANIFEST_PATH,
+) -> dict[str, list[int]]:
+    """Tạo hoặc nạp danh sách chỉ số phân tầng (Split Registry) cố định (Train 64%, Val 16%, Test 20%).
+
+    Đảm bảo tính nhất quán tuyệt đối giữa train.py, evaluate.py và error analysis.
+    """
+    path = Path(manifest_path)
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                registry = json.load(f)
+            if {"train_indices", "val_indices", "test_indices"} <= set(registry.keys()):
+                # Kiểm tra số lượng index khớp với số dòng
+                total_manifest = (
+                    len(registry["train_indices"])
+                    + len(registry["val_indices"])
+                    + len(registry["test_indices"])
+                )
+                if total_manifest == len(df):
+                    return registry
+        except Exception as exc:
+            LOGGER.warning(f"Không thể đọc manifest hiện có, tạo lại: {exc}")
+
+    clean_df = canonicalize_raw_dataframe(df)
+    labels = clean_df[TARGET_COLUMN].astype(int).to_numpy()
+    indices = np.arange(len(clean_df))
+
+    # Tách Test Set (20%)
+    train_val_idx, test_idx = train_test_split(
+        indices,
+        test_size=0.20,
+        stratify=labels[indices],
+        random_state=seed,
+    )
+
+    # Tách Train (80% của 80% = 64% tổng) và Val (20% của 80% = 16% tổng)
+    train_idx, val_idx = train_test_split(
+        train_val_idx,
+        test_size=0.20,
+        stratify=labels[train_val_idx],
+        random_state=seed,
+    )
+
+    registry = {
+        "seed": seed,
+        "stratification_target": TARGET_COLUMN,
+        "total_samples": len(clean_df),
+        "split_fractions": {"train": 0.64, "validation": 0.16, "test": 0.20},
+        "split_counts": {
+            "train": len(train_idx),
+            "validation": len(val_idx),
+            "test": len(test_idx),
+        },
+        "train_indices": [int(i) for i in train_idx],
+        "val_indices": [int(i) for i in val_idx],
+        "test_indices": [int(i) for i in test_idx],
+    }
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_json(path, registry)
+    LOGGER.info(f"Đã tạo và lưu Split Manifest cố định tại: {path}")
+    return registry
 
 
 def extract_feature_ranges(df: pd.DataFrame) -> dict[str, dict[str, float]]:
-    """Trích xuất khoảng giá trị phân bố (Min, Max, P0.5, P99.5) phục vụ kiểm tra OOD."""
+    """Trích xuất khoảng giá trị phân bố (Min, Max, P0.5, P99.5) phục vụ phân tích guardrail."""
     ranges: dict[str, dict[str, float]] = {}
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
@@ -95,6 +206,8 @@ def extract_feature_ranges(df: pd.DataFrame) -> dict[str, dict[str, float]]:
             ranges[col] = {
                 "min": float(s.min()),
                 "max": float(s.max()),
+                "mean": float(s.mean()),
+                "std": float(s.std()),
                 "p0_5": float(s.quantile(0.005)),
                 "p99_5": float(s.quantile(0.995)),
             }
@@ -102,67 +215,52 @@ def extract_feature_ranges(df: pd.DataFrame) -> dict[str, dict[str, float]]:
 
 
 def load_data(
-    path: str | Path = "data/raw/ai4i2020.csv",
+    path: str | Path = DEFAULT_RAW_DATA_PATH,
     seed: int = 42,
-) -> tuple[
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.DataFrame,
-    pd.Series,
-    pd.Series,
-    pd.Series,
-]:
-    """Nạp dữ liệu thô, loại bỏ các cột rò rỉ, tạo đặc trưng và phân chia dataset.
-
-    Args:
-        path (str | Path): Đường dẫn tới tệp CSV chứa dữ liệu AI4I 2020.
-        seed (int): Random seed dùng cho việc phân chia dữ liệu. Mặc định là 42.
+    manifest_path: str | Path = DEFAULT_SPLIT_MANIFEST_PATH,
+    return_metadata: bool = False,
+) -> tuple[Any, ...]:
+    """Nạp toàn bộ dữ liệu, chuẩn hóa canonical, tính engineered features và phân chia theo Split Registry.
 
     Returns:
-        tuple chứa (X_train, X_val, X_test, y_train, y_val, y_test)
+        Nếu return_metadata=False:
+            (X_train, X_val, X_test, y_train, y_val, y_test)
+        Nếu return_metadata=True:
+            (X_train, X_val, X_test, y_train, y_val, y_test, metadata_test)
+            trong đó metadata_test là DataFrame chứa các failure mode hậu nghiệm (TWF, HDF, PWF, OSF, RNF)
+            của riêng tập Test phục vụ Error Analysis.
     """
-    csv_path = Path(path)
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            f"Không tìm thấy dữ liệu tại '{csv_path}'. "
-            f"Vui lòng chạy `python scripts/download_data.py` trước khi huấn luyện."
-        )
+    raw_df = load_raw_dataset(path)
+    clean_df = canonicalize_raw_dataframe(raw_df)
 
-    data = pd.read_csv(csv_path)
+    # 1. Tách nhãn chính
+    labels = clean_df[TARGET_COLUMN].astype(int)
 
-    # Xác định cột target trong dataset
-    target_col = next((c for c in TARGET_CANDIDATES if c in data.columns), None)
-    if target_col is None:
-        raise KeyError(
-            f"Không tìm thấy cột nhãn target. Danh sách cột hiện tại: {list(data.columns)}"
-        )
+    # 2. Tách metadata chế độ hỏng hóc (dành riêng cho error analysis)
+    metadata_cols = [c for c in FAILURE_MODE_COLUMNS if c in clean_df.columns]
+    modes_df = clean_df[metadata_cols].copy() if metadata_cols else pd.DataFrame(index=clean_df.index)
 
-    labels = data[target_col].astype(int)
+    # 3. Xây dựng feature matrix theo đúng Shared Feature Contract
+    # Loại bỏ hoàn toàn target, id, và failure modes khỏi features
+    features_df = build_canonical_features(clean_df, expected_features=MODEL_FEATURE_CONTRACT)
 
-    # Loại bỏ 100% các cột gây Data Leakage (TWF, HDF, PWF, OSF, RNF) và các thuộc tính ID (UDI, Product ID)
-    drop_columns = [target_col, "TWF", "HDF", "PWF", "OSF", "RNF", "UDI", "Product ID"]
-    features = data.drop(columns=[c for c in drop_columns if c in data.columns])
+    # 4. Nạp hoặc sinh Split Registry
+    registry = create_or_load_split_registry(raw_df, seed=seed, manifest_path=manifest_path)
 
-    # Tạo đặc trưng vật lý nâng cao
-    features = add_engineered_features(features)
+    train_idx = registry["train_indices"]
+    val_idx = registry["val_indices"]
+    test_idx = registry["test_indices"]
 
-    # Phân chia dữ liệu phân tầng (Stratified Split): 80% (Train + Val), 20% Test
-    train_val_x, test_x, train_val_y, test_y = train_test_split(
-        features,
-        labels,
-        test_size=0.2,
-        stratify=labels,
-        random_state=seed,
-    )
+    X_train = features_df.iloc[train_idx].reset_index(drop=True)
+    X_val = features_df.iloc[val_idx].reset_index(drop=True)
+    X_test = features_df.iloc[test_idx].reset_index(drop=True)
 
-    # Tiếp tục chia 80% (Train + Val) thành 80% Train (tương đương 64% tổng) và 20% Val (tương đương 16% tổng)
-    train_x, val_x, train_y, val_y = train_test_split(
-        train_val_x,
-        train_val_y,
-        test_size=0.2,
-        stratify=train_val_y,
-        random_state=seed,
-    )
+    y_train = labels.iloc[train_idx].reset_index(drop=True)
+    y_val = labels.iloc[val_idx].reset_index(drop=True)
+    y_test = labels.iloc[test_idx].reset_index(drop=True)
 
-    return train_x, val_x, test_x, train_y, val_y, test_y
+    if return_metadata:
+        metadata_test = modes_df.iloc[test_idx].reset_index(drop=True)
+        return X_train, X_val, X_test, y_train, y_val, y_test, metadata_test
 
+    return X_train, X_val, X_test, y_train, y_val, y_test

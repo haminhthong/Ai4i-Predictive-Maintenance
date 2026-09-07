@@ -1,0 +1,20 @@
+{
+  "model_version": "ai4i-20260907-9b01f38",
+  "model_type": "rf_sigmoid_calibrated",
+  "framework": "scikit-learn",
+  "data_hash": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
+  "git_sha": "b12b2fb",
+  "created_at_utc": "2026-09-07T03:39:24.572199+00:00",
+  "feature_contract_version": "ai4i-canonical-v2",
+  "validation_metrics": {
+    "pr_auc": 0.8612622815607026,
+    "brier_score": 0.009239292141832701
+  },
+  "calibration_method": "sigmoid_cv3",
+  "runtime_environment": {
+    "python": "3.13.14",
+    "scikit_learn": "1.9.0",
+    "numpy": "2.4.6",
+    "joblib": "1.5.3"
+  }
+}
