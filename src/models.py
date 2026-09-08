@@ -72,9 +72,12 @@ def build_pipeline(
 
 def get_candidate_models(seed: int = 42) -> dict[str, Any]:
     """Tạo ba base model để so sánh bằng Stratified CV trên Development."""
+
     def make_log() -> Pipeline:
         return build_pipeline(
-            LogisticRegression(max_iter=1000, class_weight="balanced", C=1.0, random_state=seed)
+            LogisticRegression(
+                max_iter=1000, class_weight="balanced", C=1.0, random_state=seed
+            )
         )
 
     def make_rf() -> Pipeline:
@@ -113,7 +116,10 @@ def compute_calibration_curve_and_ece(
     curve_points: list[dict[str, float]] = []
 
     for i in range(n_bins):
-        bin_mask = (y_prob >= bin_edges[i]) & (y_prob < bin_edges[i + 1])
+        upper_bound = (
+            y_prob <= bin_edges[i + 1] if i == n_bins - 1 else y_prob < bin_edges[i + 1]
+        )
+        bin_mask = (y_prob >= bin_edges[i]) & upper_bound
         bin_size = int(np.sum(bin_mask))
         if bin_size > 0:
             bin_acc = float(np.mean(y_true[bin_mask]))
@@ -141,14 +147,17 @@ def compute_classification_metrics(
 ) -> dict[str, Any]:
     """Tính toán toàn diện các chỉ số phân loại và chi phí tổn thất tương đối."""
     y_pred = (y_prob >= threshold).astype(int)
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
     tn, fp, fn, tp = cm.ravel()
 
     weighted_cost = float(fn * fn_weight + fp * fp_weight)
     cost_per_1000 = float((weighted_cost / len(y_true)) * 1000.0)
 
-    pr_auc = float(average_precision_score(y_true, y_prob))
-    roc_auc = float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.5
+    has_both_classes = len(np.unique(y_true)) > 1
+    # AP không xác định khi lát dữ liệu không có positive; trả 0 để không
+    # tạo cảnh báo giả và giữ báo cáo fail-safe cho các lát kiểm tra nhỏ.
+    pr_auc = float(average_precision_score(y_true, y_prob)) if has_both_classes else 0.0
+    roc_auc = float(roc_auc_score(y_true, y_prob)) if has_both_classes else 0.5
     brier = float(brier_score_loss(y_true, y_prob))
 
     return {

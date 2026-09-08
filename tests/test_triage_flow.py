@@ -31,6 +31,18 @@ def test_missing_reference_distribution_is_unavailable() -> None:
     assert warnings
 
 
+def test_incomplete_reference_distribution_is_unavailable() -> None:
+    """Reference thiếu một feature hoặc một percentile phải fail-closed."""
+    features = pd.DataFrame({"torque_nm": [40.0], "tool_wear_min": [50.0]})
+    reference_ranges = {
+        "torque_nm": {"p0_5": 10.0, "p99_5": 80.0},
+        "tool_wear_min": {"p0_5": 0.0},
+    }
+    status, warnings = assess_distribution_guardrails(features, reference_ranges)
+    assert status == "UNAVAILABLE"
+    assert warnings
+
+
 def test_inference_rejects_target_derived_payload() -> None:
     """Payload online không được mang target hoặc failure-mode metadata."""
     service = RiskInferenceService.get_instance()

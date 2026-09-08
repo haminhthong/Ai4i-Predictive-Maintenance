@@ -55,7 +55,9 @@ def find_threshold_minimizing_cost(
     y_prob = np.asarray(probabilities, dtype=float)
 
     if y_true.shape != y_prob.shape or y_true.size == 0:
-        raise ValueError("Danh sách nhãn và xác suất phải cùng kích thước và không được rỗng.")
+        raise ValueError(
+            "Danh sách nhãn và xác suất phải cùng kích thước và không được rỗng."
+        )
 
     candidate_thresholds = np.unique(np.r_[0.0, y_prob, 1.0])
 
@@ -180,7 +182,9 @@ def tune_all_validation_policies(
     )
 
     # 5. Ngưỡng khẩn cấp (Critical Escalation Threshold)
-    critical_thresh = find_critical_threshold(y_val, probs_val, alert_threshold=cost_thresh)
+    critical_thresh = find_critical_threshold(
+        y_val, probs_val, alert_threshold=cost_thresh
+    )
 
     return {
         "policy_version": "maintenance-policy-v2",

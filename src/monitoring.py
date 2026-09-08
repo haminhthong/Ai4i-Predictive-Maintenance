@@ -51,6 +51,20 @@ def assess_distribution_guardrails(
     """Đánh giá guardrail với ba trạng thái NOMINAL, DEGRADED và UNAVAILABLE."""
     if not reference_ranges:
         return "UNAVAILABLE", ["Guardrail unavailable: thiếu reference distribution."]
+    missing_ranges = [
+        column
+        for column in features_df.columns
+        if pd.api.types.is_numeric_dtype(features_df[column])
+        and (
+            column not in reference_ranges
+            or "p0_5" not in reference_ranges[column]
+            or "p99_5" not in reference_ranges[column]
+        )
+    ]
+    if missing_ranges:
+        return "UNAVAILABLE", [
+            f"Guardrail unavailable: thiếu reference range cho {missing_ranges}."
+        ]
     has_warning, warnings = check_distribution_guardrails(features_df, reference_ranges)
     return ("DEGRADED" if has_warning else "NOMINAL"), warnings
 

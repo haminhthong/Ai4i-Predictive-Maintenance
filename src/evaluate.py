@@ -36,13 +36,23 @@ def load_frozen_artifacts() -> tuple[Any, dict[str, Any], dict[str, Any]]:
     release_dir = find_latest_release()
     if release_dir is not None:
         model = joblib.load(release_dir / "model.joblib")
-        policy = json.loads((release_dir / "decision_policy.json").read_text(encoding="utf-8"))
-        config = json.loads((release_dir / "model_config.json").read_text(encoding="utf-8"))
-        manifest = json.loads((release_dir / "manifest.json").read_text(encoding="utf-8"))
+        policy = json.loads(
+            (release_dir / "decision_policy.json").read_text(encoding="utf-8")
+        )
+        config = json.loads(
+            (release_dir / "model_config.json").read_text(encoding="utf-8")
+        )
+        manifest = json.loads(
+            (release_dir / "manifest.json").read_text(encoding="utf-8")
+        )
         manifest.update(
             {
-                "model_version": config.get("model_version", manifest.get("release_version")),
-                "model_type": config.get("model_type", manifest.get("model_type", "unknown")),
+                "model_version": config.get(
+                    "model_version", manifest.get("release_version")
+                ),
+                "model_type": config.get(
+                    "model_type", manifest.get("model_type", "unknown")
+                ),
             }
         )
         return model, policy, manifest
@@ -73,7 +83,11 @@ def load_frozen_artifacts() -> tuple[Any, dict[str, Any], dict[str, Any]]:
 
     model = joblib.load(model_path)
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest_path.exists()
+        else {}
+    )
     return model, policy, manifest
 
 
@@ -132,13 +146,20 @@ def analyze_false_negatives_and_positives(
     fn_modes: dict[str, int] = {}
     for col in FAILURE_MODE_COLUMNS:
         if col in modes_df.columns:
-            fn_modes[col] = int(np.sum(modes_df.loc[fn_mask, col].to_numpy().astype(int) == 1))
+            fn_modes[col] = int(
+                np.sum(modes_df.loc[fn_mask, col].to_numpy().astype(int) == 1)
+            )
 
     # Tóm tắt đặc trưng của các ca FN
     fn_features_summary = {}
     if fn_count > 0:
         fn_df = X_test[fn_mask]
-        for col in ["torque_nm", "tool_wear_min", "rotational_speed_rpm", "temperature_delta_k"]:
+        for col in [
+            "torque_nm",
+            "tool_wear_min",
+            "rotational_speed_rpm",
+            "temperature_delta_k",
+        ]:
             if col in fn_df.columns:
                 fn_features_summary[col] = {
                     "mean": float(fn_df[col].mean()),
@@ -186,7 +207,9 @@ def evaluate_twf_error_slice(
                     "wear_load_interaction",
                     "quality_type",
                 )
-                if column in group.columns and len(group) > 0 and column != "quality_type"
+                if column in group.columns
+                and len(group) > 0
+                and column != "quality_type"
             },
             "product_quality_type_counts": (
                 group["quality_type"].value_counts().to_dict()
@@ -204,12 +227,16 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
     # 1. Nạp Locked Test kèm metadata phân tích lỗi (15% dữ liệu)
     _, _, X_test, _, _, y_test, modes_test = load_data(return_metadata=True)
     y_test_arr = y_test.to_numpy()
-    LOGGER.info(f"Tập Test độc lập gồm {len(X_test)} mẫu ({int(np.sum(y_test_arr))} ca hỏng máy).")
+    LOGGER.info(
+        f"Tập Test độc lập gồm {len(X_test)} mẫu ({int(np.sum(y_test_arr))} ca hỏng máy)."
+    )
 
     # 2. Nạp mô hình và chính sách quyết định đã đóng băng
     model, policy, manifest = load_frozen_artifacts()
     frozen_thresholds = policy.get("frozen_thresholds", {})
-    cost_weights = policy.get("cost_weights", {"false_negative": 5.0, "false_positive": 1.0})
+    cost_weights = policy.get(
+        "cost_weights", {"false_negative": 5.0, "false_positive": 1.0}
+    )
     fn_w = float(cost_weights.get("false_negative", 5.0))
     fp_w = float(cost_weights.get("false_positive", 1.0))
 
@@ -230,9 +257,15 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
         "fixed_0_50": frozen_thresholds.get("fixed_0_50", 0.50),
         "max_f1_validation_tuned": frozen_thresholds.get("max_f1_validation", 0.5),
         "cost_sensitive_validation_tuned": primary_thresh,
-        "capacity_constrained_5pct": frozen_thresholds.get("capacity_constrained_5pct", primary_thresh),
-        "capacity_constrained_3pct": frozen_thresholds.get("capacity_constrained_3pct", primary_thresh),
-        "capacity_constrained_2pct": frozen_thresholds.get("capacity_constrained_2pct", primary_thresh),
+        "capacity_constrained_5pct": frozen_thresholds.get(
+            "capacity_constrained_5pct", primary_thresh
+        ),
+        "capacity_constrained_3pct": frozen_thresholds.get(
+            "capacity_constrained_3pct", primary_thresh
+        ),
+        "capacity_constrained_2pct": frozen_thresholds.get(
+            "capacity_constrained_2pct", primary_thresh
+        ),
     }
 
     ablation_study: dict[str, Any] = {}
@@ -324,10 +357,18 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
             for path in release_dir.iterdir()
             if path.is_file() and path.name != "manifest.json"
         }
-        release_manifest["model_sha256"] = release_manifest["file_hashes"]["model.joblib"]
-        release_manifest["feature_contract_sha256"] = release_manifest["file_hashes"]["feature_contract.json"]
-        release_manifest["policy_sha256"] = release_manifest["file_hashes"]["decision_policy.json"]
-        release_manifest["reference_distribution_sha256"] = release_manifest["file_hashes"]["reference_distribution.json"]
+        release_manifest["model_sha256"] = release_manifest["file_hashes"][
+            "model.joblib"
+        ]
+        release_manifest["feature_contract_sha256"] = release_manifest["file_hashes"][
+            "feature_contract.json"
+        ]
+        release_manifest["policy_sha256"] = release_manifest["file_hashes"][
+            "decision_policy.json"
+        ]
+        release_manifest["reference_distribution_sha256"] = release_manifest[
+            "file_hashes"
+        ]["reference_distribution.json"]
         save_json(manifest_path, release_manifest)
 
     LOGGER.info("=== KẾT QUẢ ĐÁNH GIÁ TRÊN TẬP TEST ĐỘC LẬP ===")

@@ -13,7 +13,9 @@ class SQLiteRiskEventStore:
     """Lưu risk event bền vững qua restart; không retrain trực tiếp từ review."""
 
     def __init__(self, db_path: str | Path | None = None) -> None:
-        configured_path = db_path or os.getenv("RISK_EVENT_DB_PATH", "data/runtime/risk_events.sqlite3")
+        configured_path = db_path or os.getenv(
+            "RISK_EVENT_DB_PATH", "data/runtime/risk_events.sqlite3"
+        )
         self.db_path = str(configured_path)
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -62,7 +64,9 @@ class SQLiteRiskEventStore:
             )
             columns = {
                 row["name"]
-                for row in connection.execute("PRAGMA table_info(sensor_events)").fetchall()
+                for row in connection.execute(
+                    "PRAGMA table_info(sensor_events)"
+                ).fetchall()
             }
             if "shift" not in columns:
                 connection.execute("ALTER TABLE sensor_events ADD COLUMN shift TEXT")
@@ -111,7 +115,9 @@ class SQLiteRiskEventStore:
                     event["reliability_status"],
                     event["action"],
                     int(event["queue_eligible"]),
-                    json.dumps(event.get("observed_conditions", []), ensure_ascii=False),
+                    json.dumps(
+                        event.get("observed_conditions", []), ensure_ascii=False
+                    ),
                 ),
             )
 

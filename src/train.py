@@ -109,10 +109,13 @@ def _write_release(
     save_json(release_dir / "reference_distribution.json", reference_distribution)
     save_json(release_dir / "data_manifest.json", data_manifest)
     save_json(release_dir / "validation_metrics.json", validation_metrics)
-    save_json(release_dir / "locked_test_metrics.json", {
-        "status": "pending_locked_test_evaluation",
-        "evaluation_protocol": "report_only_after_policy_freeze",
-    })
+    save_json(
+        release_dir / "locked_test_metrics.json",
+        {
+            "status": "pending_locked_test_evaluation",
+            "evaluation_protocol": "report_only_after_policy_freeze",
+        },
+    )
     (release_dir / "MODEL_CARD.md").write_text(model_card, encoding="utf-8")
 
     file_hashes = {
@@ -186,12 +189,16 @@ def train_and_freeze_system() -> dict[str, Any]:
     reference_distribution = extract_feature_ranges(X_development)
 
     candidates = get_candidate_models(seed=SEED)
-    leaderboard, _ = _cross_validate_candidates(candidates, X_development, y_development)
+    leaderboard, _ = _cross_validate_candidates(
+        candidates, X_development, y_development
+    )
     champion_name = _choose_champion(leaderboard)
     LOGGER.info("Champion được chọn từ Development CV: %s", champion_name)
 
     # Calibration là stage riêng, chỉ fit sau khi base model đã được chọn.
-    calibrated_model = calibrate_model(get_candidate_models(seed=SEED)[champion_name], cv=3)
+    calibrated_model = calibrate_model(
+        get_candidate_models(seed=SEED)[champion_name], cv=3
+    )
     calibrated_model.fit(X_development, y_development)
     policy_probabilities = calibrated_model.predict_proba(X_policy)[:, 1]
     costs = BusinessCosts(false_negative=5.0, false_positive=1.0)
@@ -224,7 +231,12 @@ def train_and_freeze_system() -> dict[str, Any]:
         "numeric_features": list(NUMERIC_FEATURES),
         "categorical_features": list(CATEGORICAL_FEATURES),
         "runtime_metadata_excluded_from_model": [
-            "event_id", "asset_id", "event_time", "line_id", "sensor_source", "shift"
+            "event_id",
+            "asset_id",
+            "event_time",
+            "line_id",
+            "sensor_source",
+            "shift",
         ],
     }
     validation_metrics = {
@@ -272,7 +284,9 @@ def train_and_freeze_system() -> dict[str, Any]:
     try:
         save_json(Path("reports/validation_metrics.json"), validation_metrics)
     except PermissionError:
-        LOGGER.warning("Không ghi được báo cáo validation legacy; bản chuẩn nằm trong release.")
+        LOGGER.warning(
+            "Không ghi được báo cáo validation legacy; bản chuẩn nằm trong release."
+        )
     LOGGER.info("Đã tạo release bundle: %s", release_dir)
     return validation_metrics
 

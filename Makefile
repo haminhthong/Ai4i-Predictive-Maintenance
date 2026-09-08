@@ -27,7 +27,7 @@ setup:
 	python -m pip install -r requirements.txt
 
 download:
-	python scripts/download_data.py
+	python -m scripts.download_data
 
 train:
 	python -m src.train

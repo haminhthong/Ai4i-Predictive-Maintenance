@@ -18,7 +18,7 @@ RUN python -m pip install --upgrade pip \
 COPY . .
 
 # Bước 1: Tải dữ liệu thô
-RUN python scripts/download_data.py
+RUN python -m scripts.download_data
 
 # Bước 2: Huấn luyện mô hình -> sinh release bundle và mirror legacy
 RUN python -m src.train

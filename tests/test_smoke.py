@@ -32,6 +32,7 @@ from src.data import (
 )
 from src.features import add_engineered_features, build_canonical_features
 from src.inference import RiskInferenceService
+from src.models import compute_calibration_curve_and_ece, compute_classification_metrics
 from src.policy import (
     BusinessCosts,
     find_threshold_maximizing_f1,
@@ -40,6 +41,28 @@ from src.policy import (
 )
 
 client = TestClient(app)
+
+
+def test_calibration_curve_includes_probability_one() -> None:
+    """Điểm xác suất đúng bằng 1.0 phải được tính vào bin cuối."""
+    _, curve = compute_calibration_curve_and_ece(
+        np.array([0, 1, 1]),
+        np.array([0.1, 0.6, 1.0]),
+        n_bins=5,
+    )
+    assert sum(point["count"] for point in curve) == 3
+
+
+def test_classification_metrics_accept_single_class_labels() -> None:
+    """Báo cáo metric không được vỡ khi một lát dữ liệu chỉ có một nhãn."""
+    metrics = compute_classification_metrics(
+        np.array([0, 0]),
+        np.array([0.1, 0.2]),
+        threshold=0.5,
+    )
+    assert metrics["true_negatives"] == 2
+    assert metrics["true_positives"] == 0
+    assert metrics["pr_auc"] == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +74,9 @@ def test_failure_flags_never_enter_features() -> None:
     """INVARIANT 1: Các cờ cơ chế hỏng hóc hậu nghiệm (TWF, HDF, PWF, OSF, RNF) tuyệt đối không được lọt vào feature contract."""
     contract_features = set(MODEL_FEATURE_CONTRACT)
     for flag in FAILURE_MODE_COLUMNS:
-        assert flag not in contract_features, f"Phát hiện rò rỉ: cờ '{flag}' nằm trong feature contract!"
+        assert flag not in contract_features, (
+            f"Phát hiện rò rỉ: cờ '{flag}' nằm trong feature contract!"
+        )
     assert TARGET_COLUMN not in contract_features
     for identifier in IDENTIFIER_COLUMNS:
         assert identifier not in contract_features
@@ -241,7 +266,9 @@ def test_engineered_features_formulas() -> None:
 
     # mechanical_power_w = 40 * (1500 * 2 * pi / 60) ≈ 6283.185 Watts
     expected_power = 40.0 * (1500.0 * 2.0 * math.pi / 60.0)
-    assert pytest.approx(res_df.loc[0, "mechanical_power_w"], rel=1e-3) == expected_power
+    assert (
+        pytest.approx(res_df.loc[0, "mechanical_power_w"], rel=1e-3) == expected_power
+    )
 
     # wear_load_interaction = 20 * 40 = 800.0 min*Nm
     assert res_df.loc[0, "wear_load_interaction"] == 800.0
@@ -258,7 +285,9 @@ def test_business_threshold_prefers_lower_total_cost() -> None:
     probabilities = np.array([0.9, 0.6, 0.4, 0.1])
     costs = BusinessCosts(false_negative=5.0, false_positive=1.0)
 
-    optimal_thresh, min_cost = find_threshold_minimizing_cost(labels, probabilities, costs)
+    optimal_thresh, min_cost = find_threshold_minimizing_cost(
+        labels, probabilities, costs
+    )
     assert optimal_thresh == 0.6
     assert min_cost == 0.0
 
@@ -278,11 +307,28 @@ def test_business_threshold_capacity_constraint() -> None:
 
 def test_map_decision_action_prioritization() -> None:
     """Hàm map_decision_action trả về PRIORITY_REVIEW, REVIEW_REQUIRED, NO_ALERT chuẩn xác."""
-    assert map_decision_action(0.85, alert_threshold=0.35, critical_threshold=0.75) == "PRIORITY_REVIEW"
-    assert map_decision_action(0.50, alert_threshold=0.35, critical_threshold=0.75) == "REVIEW_REQUIRED"
-    assert map_decision_action(0.20, alert_threshold=0.35, critical_threshold=0.75) == "NO_ALERT"
+    assert (
+        map_decision_action(0.85, alert_threshold=0.35, critical_threshold=0.75)
+        == "PRIORITY_REVIEW"
+    )
+    assert (
+        map_decision_action(0.50, alert_threshold=0.35, critical_threshold=0.75)
+        == "REVIEW_REQUIRED"
+    )
+    assert (
+        map_decision_action(0.20, alert_threshold=0.35, critical_threshold=0.75)
+        == "NO_ALERT"
+    )
     # Khi có warning phân bố nhưng xác suất thấp -> Vẫn kích hoạt REVIEW_REQUIRED
-    assert map_decision_action(0.10, alert_threshold=0.35, critical_threshold=0.75, distribution_warning=True) == "REVIEW_REQUIRED"
+    assert (
+        map_decision_action(
+            0.10,
+            alert_threshold=0.35,
+            critical_threshold=0.75,
+            distribution_warning=True,
+        )
+        == "REVIEW_REQUIRED"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -330,7 +376,11 @@ def test_api_predict_endpoint_4block_structure() -> None:
     assert data["reliability"]["status"] in ["NOMINAL", "DEGRADED"]
 
     assert "decision" in data
-    assert data["decision"]["action"] in ["NO_ALERT", "REVIEW_REQUIRED", "PRIORITY_REVIEW"]
+    assert data["decision"]["action"] in [
+        "NO_ALERT",
+        "REVIEW_REQUIRED",
+        "PRIORITY_REVIEW",
+    ]
     assert "alert_threshold" in data["decision"]
 
     assert "operational_context" in data

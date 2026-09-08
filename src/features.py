@@ -43,7 +43,11 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         else:
             # Tìm kiếm trường hợp không phân biệt hoa/thường nếu không khớp trực tiếp
             lower_matched = next(
-                (v for k, v in RAW_TO_CANONICAL_COLUMN_MAP.items() if k.lower() == col_clean.lower()),
+                (
+                    v
+                    for k, v in RAW_TO_CANONICAL_COLUMN_MAP.items()
+                    if k.lower() == col_clean.lower()
+                ),
                 None,
             )
             if lower_matched:
@@ -70,7 +74,9 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     # Chuẩn hóa giá trị cột quality_type nếu có
     if "quality_type" in clean_df.columns:
-        clean_df["quality_type"] = clean_df["quality_type"].astype(str).str.strip().str.upper()
+        clean_df["quality_type"] = (
+            clean_df["quality_type"].astype(str).str.strip().str.upper()
+        )
         invalid_types = sorted(
             set(clean_df["quality_type"].dropna()) - set(VALID_QUALITY_TYPES)
         )
@@ -115,7 +121,9 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # 1. Thermal operating-state proxy (K)
-    data["temperature_delta_k"] = data["process_temperature_k"] - data["air_temperature_k"]
+    data["temperature_delta_k"] = (
+        data["process_temperature_k"] - data["air_temperature_k"]
+    )
 
     # 2. Công suất cơ học thực tế (Watts: P = tau * omega)
     angular_velocity = data["rotational_speed_rpm"] * (2.0 * np.pi / 60.0)
@@ -167,7 +175,9 @@ def build_canonical_features(
     # Khi có raw sensor, luôn tính lại engineered features để caller không thể
     # gửi giá trị dẫn xuất sai hoặc tạo train-serving skew.
     has_raw_sensor = all(col in clean_df.columns for col in RAW_SENSOR_FEATURES)
-    if has_raw_sensor or not all(col in clean_df.columns for col in ENGINEERED_FEATURES):
+    if has_raw_sensor or not all(
+        col in clean_df.columns for col in ENGINEERED_FEATURES
+    ):
         clean_df = add_engineered_features(clean_df)
 
     # Chỉ chọn và sắp xếp các cột theo đúng Feature Contract

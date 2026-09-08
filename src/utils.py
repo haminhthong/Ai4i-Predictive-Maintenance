@@ -28,8 +28,10 @@ def normalize_event_time(value: str | None) -> str | None:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError("event_time phải kèm timezone, ví dụ `2026-09-07T10:15:00Z`.")
 
-    return parsed.astimezone(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
-        "+00:00", "Z"
+    return (
+        parsed.astimezone(timezone.utc)  # noqa: UP017 - tương thích Python 3.10
+        .isoformat()
+        .replace("+00:00", "Z")
     )
 
 

@@ -37,7 +37,11 @@ def find_latest_release(releases_dir: str | Path = "releases") -> Path | None:
     if not root.exists():
         return None
     candidates = sorted(
-        (path for path in root.iterdir() if path.is_dir() and (path / "manifest.json").exists()),
+        (
+            path
+            for path in root.iterdir()
+            if path.is_dir() and (path / "manifest.json").exists()
+        ),
         key=lambda path: path.name,
         reverse=True,
     )

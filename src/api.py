@@ -145,12 +145,19 @@ class DecisionBlock(BaseModel):
     """Khối quyết định bảo trì và khuyến nghị vận hành."""
 
     action: str = Field(
-        ..., description="Hành động: 'NO_ALERT', 'REVIEW_REQUIRED', hoặc 'PRIORITY_REVIEW'"
+        ...,
+        description="Hành động: 'NO_ALERT', 'REVIEW_REQUIRED', hoặc 'PRIORITY_REVIEW'",
     )
     alert_threshold: float = Field(..., description="Ngưỡng kích hoạt kiểm tra bảo trì")
-    critical_threshold: float = Field(..., description="Ngưỡng đưa event vào priority review")
-    maintenance_alert: bool = Field(..., description="Cờ cảnh báo (True nếu action != NO_ALERT)")
-    policy_version: str = Field(..., description="Phiên bản chính sách quyết định đang áp dụng")
+    critical_threshold: float = Field(
+        ..., description="Ngưỡng đưa event vào priority review"
+    )
+    maintenance_alert: bool = Field(
+        ..., description="Cờ cảnh báo (True nếu action != NO_ALERT)"
+    )
+    policy_version: str = Field(
+        ..., description="Phiên bản chính sách quyết định đang áp dụng"
+    )
     cost_scenario: str = Field(..., description="Kịch bản chi phí nghiệp vụ đã tối ưu")
 
 
@@ -173,7 +180,8 @@ class OperationalContextBlock(BaseModel):
     """Khối thông tin ngữ cảnh vận hành và giải thích đặc trưng."""
 
     reason_codes: list[str] = Field(
-        ..., description="Điều kiện heuristic quan sát được, không phải model attribution"
+        ...,
+        description="Điều kiện heuristic quan sát được, không phải model attribution",
     )
     feature_context: list[dict[str, Any]] = Field(
         ..., description="Bảng ngữ cảnh giá trị các đặc trưng quan sát"
@@ -293,7 +301,9 @@ def readiness_check() -> dict[str, Any]:
                 "tool_wear_min": 10.0,
             }
             res = service.predict(test_sample, persist_event=False)
-            test_passed = "risk" in res and res["reliability"]["status"] != "UNAVAILABLE"
+            test_passed = (
+                "risk" in res and res["reliability"]["status"] != "UNAVAILABLE"
+            )
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
             LOGGER.error(f"Readiness test cycle failed: {exc}")
             test_passed = False
@@ -338,11 +348,17 @@ def predict_machine_failure_risk(payload: SensorPayload) -> dict[str, Any]:
     try:
         raw_dict = payload.model_dump(by_alias=True, exclude_none=True)
         return service.predict(raw_dict)
-    except Exception as exc:
-        LOGGER.error(f"Lỗi trong quá trình suy luận: {exc}", exc_info=True)
+    except (KeyError, TypeError, ValueError) as exc:
+        LOGGER.warning("Payload suy luận không hợp lệ: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Lỗi xử lý dữ liệu cảm biến: {exc!s}",
+        ) from exc
+    except RuntimeError as exc:
+        LOGGER.exception("Suy luận không hoàn tất: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Dịch vụ chưa thể hoàn tất suy luận hoặc lưu risk event.",
         ) from exc
 
 
@@ -352,7 +368,9 @@ def score_snapshot(payload: SensorPayload) -> dict[str, Any]:
     return predict_machine_failure_risk(payload)
 
 
-@app.post("/maintenance/queue/build", response_model=QueueBuildResponse, tags=["Maintenance"])
+@app.post(
+    "/maintenance/queue/build", response_model=QueueBuildResponse, tags=["Maintenance"]
+)
 def build_maintenance_queue_endpoint(request: QueueBuildRequest) -> dict[str, Any]:
     """Xếp event mới nhất theo asset và lấy top-K theo capacity."""
     service = RiskInferenceService.get_instance()
@@ -394,9 +412,9 @@ def record_maintenance_review(review: MaintenanceReviewRequest) -> dict[str, str
         payload = review.model_dump(exclude_none=True)
         payload.setdefault(
             "reviewed_at",
-            datetime.now(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
-                "+00:00", "Z"
-            ),
+            datetime.now(timezone.utc)  # noqa: UP017 - tương thích Python 3.10
+            .isoformat()
+            .replace("+00:00", "Z"),
         )
         service.record_review(payload)
     except (OSError, RuntimeError, ValueError) as exc:
@@ -418,7 +436,9 @@ def generate_operational_reason_codes(payload: SensorPayload) -> list[str]:
     return service.extract_operational_reason_codes(payload.model_dump(by_alias=True))
 
 
-def get_model_config_and_ranges() -> tuple[Any, dict[str, Any], dict[str, dict[str, float]]]:
+def get_model_config_and_ranges() -> tuple[
+    Any, dict[str, Any], dict[str, dict[str, float]]
+]:
     """Hàm helper phục vụ tương thích ngược với scripts cũ."""
     service = RiskInferenceService.get_instance()
     return service.model, service.manifest, service.reference_distribution

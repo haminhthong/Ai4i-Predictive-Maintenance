@@ -18,6 +18,7 @@ from .contracts import (
     FAILURE_MODE_COLUMNS,
     IDENTIFIER_COLUMNS,
     MODEL_FEATURE_CONTRACT,
+    NUMERIC_FEATURES,
     TARGET_COLUMN,
 )
 from .features import build_canonical_features, canonicalize_raw_dataframe
@@ -69,24 +70,39 @@ class RiskInferenceService:
             "required_files": not bool(checks.get("missing_files")),
             "feature_contract_exact": False,
             "reference_distribution_exists": False,
+            "reference_distribution_complete": False,
             "ready": False,
         }
         if not checks.get("hashes_match"):
-            self.artifact_checks["error"] = checks.get("error", "Hash release không khớp.")
+            self.artifact_checks["error"] = checks.get(
+                "error", "Hash release không khớp."
+            )
             return
 
         self.bundle_dir = bundle_dir
         self.manifest = checks["manifest"]
         self.model = joblib.load(bundle_dir / "model.joblib")
-        self.policy = json.loads((bundle_dir / "decision_policy.json").read_text(encoding="utf-8"))
-        self.contract = json.loads((bundle_dir / "feature_contract.json").read_text(encoding="utf-8"))
+        self.policy = json.loads(
+            (bundle_dir / "decision_policy.json").read_text(encoding="utf-8")
+        )
+        self.contract = json.loads(
+            (bundle_dir / "feature_contract.json").read_text(encoding="utf-8")
+        )
         self.reference_distribution = json.loads(
             (bundle_dir / "reference_distribution.json").read_text(encoding="utf-8")
         )
-        self.artifact_checks["feature_contract_exact"] = self.contract.get("features") == list(
-            MODEL_FEATURE_CONTRACT
+        self.artifact_checks["feature_contract_exact"] = self.contract.get(
+            "features"
+        ) == list(MODEL_FEATURE_CONTRACT)
+        self.artifact_checks["reference_distribution_exists"] = bool(
+            self.reference_distribution
         )
-        self.artifact_checks["reference_distribution_exists"] = bool(self.reference_distribution)
+        self.artifact_checks["reference_distribution_complete"] = all(
+            feature in self.reference_distribution
+            and "p0_5" in self.reference_distribution[feature]
+            and "p99_5" in self.reference_distribution[feature]
+            for feature in NUMERIC_FEATURES
+        )
         self.artifact_checks["ready"] = all(
             self.artifact_checks[key]
             for key in (
@@ -95,6 +111,7 @@ class RiskInferenceService:
                 "required_files",
                 "feature_contract_exact",
                 "reference_distribution_exists",
+                "reference_distribution_complete",
             )
         )
 
@@ -123,11 +140,14 @@ class RiskInferenceService:
             self.policy = json.loads(policy_file.read_text(encoding="utf-8"))
         elif config_file.exists():
             config = json.loads(config_file.read_text(encoding="utf-8"))
-            self.policy = config.get("decision_policy", {
-                "policy_version": "maintenance-policy-v2",
-                "primary_alert_threshold": config.get("threshold", 0.5),
-                "critical_threshold": config.get("critical_threshold", 0.75),
-            })
+            self.policy = config.get(
+                "decision_policy",
+                {
+                    "policy_version": "maintenance-policy-v2",
+                    "primary_alert_threshold": config.get("threshold", 0.5),
+                    "critical_threshold": config.get("critical_threshold", 0.75),
+                },
+            )
 
         contract_file = ARTIFACTS_DIR / "feature_contract.json"
         self.contract = (
@@ -139,15 +159,24 @@ class RiskInferenceService:
         if not distribution_file.exists():
             distribution_file = MODELS_DIR / "feature_ranges.json"
         if distribution_file.exists():
-            self.reference_distribution = json.loads(distribution_file.read_text(encoding="utf-8"))
+            self.reference_distribution = json.loads(
+                distribution_file.read_text(encoding="utf-8")
+            )
 
         # Legacy artifact được phép chạy để migration, nhưng không được coi là ready.
         self.artifact_checks = {
             "bundle_exists": False,
             "hashes_match": False,
             "required_files": False,
-            "feature_contract_exact": self.contract.get("features") == list(MODEL_FEATURE_CONTRACT),
+            "feature_contract_exact": self.contract.get("features")
+            == list(MODEL_FEATURE_CONTRACT),
             "reference_distribution_exists": bool(self.reference_distribution),
+            "reference_distribution_complete": all(
+                feature in self.reference_distribution
+                and "p0_5" in self.reference_distribution[feature]
+                and "p99_5" in self.reference_distribution[feature]
+                for feature in NUMERIC_FEATURES
+            ),
             "ready": False,
             "warning": "Đang dùng artifact legacy; hãy tạo release bundle mới.",
         }
@@ -177,6 +206,7 @@ class RiskInferenceService:
 
     def extract_operational_reason_codes(self, raw_input: dict[str, Any]) -> list[str]:
         """Sinh điều kiện quan sát theo heuristic, không phải model attribution."""
+
         def number(*keys: str, default: float) -> float:
             for key in keys:
                 value = raw_input.get(key)
@@ -222,13 +252,17 @@ class RiskInferenceService:
             )
         return context
 
-    def predict(self, raw_payload: dict[str, Any], persist_event: bool = True) -> dict[str, Any]:
+    def predict(
+        self, raw_payload: dict[str, Any], persist_event: bool = True
+    ) -> dict[str, Any]:
         """Chấm điểm snapshot: contract -> features -> risk -> reliability -> triage."""
         if not self.is_loaded or self.model is None:
             raise RuntimeError("Mô hình chưa sẵn sàng hoạt động.")
 
         canonical_payload = canonicalize_raw_dataframe(pd.DataFrame([raw_payload]))
-        forbidden_columns = set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
+        forbidden_columns = (
+            set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
+        )
         leaked_columns = sorted(forbidden_columns & set(canonical_payload.columns))
         if leaked_columns:
             raise ValueError(
@@ -262,7 +296,9 @@ class RiskInferenceService:
         feature_context = self.extract_feature_context(features)
         event_id = str(raw_payload.get("event_id") or f"evt_{uuid.uuid4().hex[:12]}")
         asset_id = str(raw_payload.get("asset_id") or "UNKNOWN_ASSET")
-        event_time = normalize_event_time(raw_payload.get("event_time")) or datetime.now(
+        event_time = normalize_event_time(
+            raw_payload.get("event_time")
+        ) or datetime.now(
             timezone.utc,  # noqa: UP017 - tương thích Python 3.10
         ).isoformat().replace("+00:00", "Z")
         model_version = str(self.manifest.get("model_version", "unknown"))
@@ -286,12 +322,14 @@ class RiskInferenceService:
             "policy_version": policy_version,
         }
         if persist_event:
-            self.risk_events.append(event)
             try:
                 self.event_store.record_event(event, raw_payload)
-            except Exception:
-                # Lưu trữ không được làm thay đổi điểm risk; lỗi sẽ được monitoring ghi nhận.
+            except Exception as exc:
                 LOGGER.exception("Không thể ghi risk event vào SQLite.")
+                raise RuntimeError(
+                    "Không thể lưu risk event; queue chưa được cập nhật."
+                ) from exc
+            self.risk_events.append(event)
 
         return {
             "event_id": event_id,
@@ -346,7 +384,9 @@ class RiskInferenceService:
         costs = self.policy.get("cost_weights", {})
         return f"FN{float(costs.get('false_negative', 5.0)):.0f}_FP{float(costs.get('false_positive', 1.0)):.0f}"
 
-    def build_queue(self, capacity: int, shift: str | None = None) -> list[dict[str, Any]]:
+    def build_queue(
+        self, capacity: int, shift: str | None = None
+    ) -> list[dict[str, Any]]:
         """Xếp queue từ các risk event đã ghi nhận trong tiến trình hiện tại."""
         persisted_events = self.event_store.list_risk_events()
         if shift is not None:

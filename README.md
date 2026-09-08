@@ -1,6 +1,15 @@
 # AI4I Condition-Based Maintenance Risk Triage
 
+[![CI](https://github.com/haminhthong/Ai4i-Predictive-Maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/haminhthong/Ai4i-Predictive-Maintenance/actions/workflows/ci.yml)
 [![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/API-FastAPI-009688.svg)](https://fastapi.tiangolo.com/)
+[![scikit--learn](https://img.shields.io/badge/ML-scikit--learn-F7931E.svg)](https://scikit-learn.org/)
+[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B.svg)](https://streamlit.io/)
+[![pytest](https://img.shields.io/badge/Test-pytest-0A9EDC.svg)](https://pytest.org/)
+[![Ruff](https://img.shields.io/badge/Lint-Ruff-D7FF64.svg)](https://docs.astral.sh/ruff/)
+[![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57.svg)](https://www.sqlite.org/)
+[![Docker](https://img.shields.io/badge/Runtime-Docker-2496ED.svg)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 Hệ thống này nhận một operating snapshot của máy, tính rủi ro hỏng hóc đã hiệu chuẩn, kiểm tra độ tin cậy của dữ liệu cảm biến và đưa ra quyết định triage theo năng lực xử lý của đội bảo trì.
 
@@ -223,6 +232,7 @@ Báo cáo quan trọng:
 
 ```text
 Predictive-Maintenance-Ai4i/
+├── .github/workflows/ci.yml       # CI: Python matrix + Ruff + pytest
 ├── app.py                         # Streamlit dashboard
 ├── configs/
 │   ├── model.yaml                 # Cấu hình tham chiếu model/split
@@ -270,6 +280,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install ruff
 ```
 
 Linux/macOS:
@@ -279,12 +290,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
+python -m pip install ruff
 ```
 
 Yêu cầu Python 3.10 trở lên. Nếu `data/raw/ai4i2020.csv` chưa tồn tại, tải dữ liệu:
 
 ```bash
-python scripts/download_data.py
+python -m scripts.download_data
 ```
 
 ### 2. Chạy pipeline chuẩn
@@ -313,6 +325,22 @@ python -m ruff check --no-cache src app.py tests scripts
 ```
 
 Các test chính kiểm tra leakage boundary, alias schema, unavailable reliability, release hash, queue latest-per-asset, priority override và rejection của target/identifier trong direct inference.
+
+### CI pipeline
+
+Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) chạy trên Python 3.10, 3.11 và 3.12. Mỗi push hoặc pull request vào `main` thực hiện cùng một chuỗi:
+
+```mermaid
+flowchart TD
+    CHECKOUT["Checkout source"] --> SETUP["Setup Python 3.10 / 3.11 / 3.12"]
+    SETUP --> INSTALL["Install requirements + Ruff"]
+    INSTALL --> DOWNLOAD["Download AI4I dataset"]
+    DOWNLOAD --> LINT["Ruff check"]
+    LINT --> TEST["Pytest: contract + API + queue + release checks"]
+    TEST --> PASS["CI passed"]
+```
+
+CI không huấn luyện lại model và không sửa release artifact; nó kiểm tra code mới trên dataset và release đã được commit.
 
 ### 5. Chạy bằng Makefile
 

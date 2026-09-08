@@ -52,7 +52,7 @@ reports/*.json
 *.log
 logs/
 
-# Misc
-README.md
-LICENSE
-*.md
+# Root documentation không cần trong runtime image.
+# Không dùng *.md ở đây vì release bundle bắt buộc chứa MODEL_CARD.md.
+/README.md
+/LICENSE
