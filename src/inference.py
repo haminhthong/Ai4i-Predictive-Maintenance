@@ -24,6 +24,7 @@ from .features import build_canonical_features, canonicalize_raw_dataframe
 from .monitoring import assess_distribution_guardrails
 from .policy import build_maintenance_queue, map_decision_action
 from .storage import SQLiteRiskEventStore
+from .utils import normalize_event_time
 
 LOGGER = logging.getLogger("ai_condition_risk.inference")
 ARTIFACTS_DIR = Path("artifacts/champion")
@@ -221,7 +222,7 @@ class RiskInferenceService:
             )
         return context
 
-    def predict(self, raw_payload: dict[str, Any]) -> dict[str, Any]:
+    def predict(self, raw_payload: dict[str, Any], persist_event: bool = True) -> dict[str, Any]:
         """Chấm điểm snapshot: contract -> features -> risk -> reliability -> triage."""
         if not self.is_loaded or self.model is None:
             raise RuntimeError("Mô hình chưa sẵn sàng hoạt động.")
@@ -261,12 +262,9 @@ class RiskInferenceService:
         feature_context = self.extract_feature_context(features)
         event_id = str(raw_payload.get("event_id") or f"evt_{uuid.uuid4().hex[:12]}")
         asset_id = str(raw_payload.get("asset_id") or "UNKNOWN_ASSET")
-        event_time = str(
-            raw_payload.get("event_time")
-            or datetime.now(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
-                "+00:00", "Z"
-            )
-        )
+        event_time = normalize_event_time(raw_payload.get("event_time")) or datetime.now(
+            timezone.utc,  # noqa: UP017 - tương thích Python 3.10
+        ).isoformat().replace("+00:00", "Z")
         model_version = str(self.manifest.get("model_version", "unknown"))
         policy_version = str(self.policy.get("policy_version", "unknown"))
         priority = {
@@ -287,12 +285,13 @@ class RiskInferenceService:
             "model_version": model_version,
             "policy_version": policy_version,
         }
-        self.risk_events.append(event)
-        try:
-            self.event_store.record_event(event, raw_payload)
-        except Exception:
-            # Lưu trữ không được làm thay đổi điểm risk; lỗi sẽ được monitoring ghi nhận.
-            LOGGER.exception("Không thể ghi risk event vào SQLite.")
+        if persist_event:
+            self.risk_events.append(event)
+            try:
+                self.event_store.record_event(event, raw_payload)
+            except Exception:
+                # Lưu trữ không được làm thay đổi điểm risk; lỗi sẽ được monitoring ghi nhận.
+                LOGGER.exception("Không thể ghi risk event vào SQLite.")
 
         return {
             "event_id": event_id,

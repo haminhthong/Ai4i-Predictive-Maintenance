@@ -131,9 +131,6 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
     # Nạp báo cáo test metrics và failure mode analysis nếu có
     test_metrics = {}
     test_metrics_path = Path("reports/final_test_metrics.json")
-    if not test_metrics_path.exists():
-        test_metrics_path = Path("reports/test_metrics.json")
-
     if test_metrics_path.exists():
         with suppress(OSError, json.JSONDecodeError):
             test_metrics = json.loads(test_metrics_path.read_text(encoding="utf-8"))
@@ -207,7 +204,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
     with col3:
         st.metric("Brier / ECE", f"{perf.get('brier_score', perf.get('brier', 0.0)):.4f} / {perf.get('ece', 0.0):.4f}" if perf else "N/A")
     with col4:
-        alert_thresh = service.policy.get("primary_alert_threshold", 0.3574) if service_ready else 0.3574
+        alert_thresh = service.policy.get("primary_alert_threshold", 0.5) if service_ready else 0.5
         st.metric("Alert Threshold (θ*)", f"{alert_thresh:.4f}")
     with col5:
         cost_1k = perf.get("cost_units_per_1000_observations", perf.get("cost_per_1000_machines", 0.0)) if perf else 0.0
@@ -227,7 +224,8 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
         }
 
         # Gọi Inference Service đồng bộ hoàn toàn với API
-        result = service.predict(raw_payload)
+        # Dashboard chỉ mô phỏng; không ghi một event mới ở mỗi lần Streamlit rerun.
+        result = service.predict(raw_payload, persist_event=False)
 
         pred_block = result["prediction"]
         rel_block = result["reliability"]
@@ -303,9 +301,9 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
         with right_col:
             st.subheader("📐 Đặc trưng Dẫn xuất & Phân tích Nghiệp vụ")
 
-            temp_delta = proc_temp - air_temp
-            mech_power = torque_nm * (speed_rpm * 2.0 * 3.14159265 / 60.0)
-            wear_load = tool_wear * torque_nm
+            feature_values = {
+                item["feature"]: item["value"] for item in ops_block["feature_context"]
+            }
 
             df_features = pd.DataFrame(
                 {
@@ -315,9 +313,9 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
                         "wear_load_interaction",
                     ],
                     "Giá trị tính toán": [
-                        f"{temp_delta:.2f} K",
-                        f"{mech_power:.2f} Watts",
-                        f"{wear_load:.2f} min·Nm",
+                        f"{float(feature_values['temperature_delta_k']):.2f} K",
+                        f"{float(feature_values['mechanical_power_w']):.2f} Watts",
+                        f"{float(feature_values['wear_load_interaction']):.2f} min·Nm",
                     ],
                     "Ý nghĩa kỹ thuật": [
                         "Thermal operating-state proxy (Độ chênh nhiệt gia công và buồng máy)",

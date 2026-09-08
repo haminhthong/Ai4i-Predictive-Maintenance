@@ -22,6 +22,7 @@ class SQLiteRiskEventStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     def _initialize(self) -> None:
@@ -71,8 +72,13 @@ class SQLiteRiskEventStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO sensor_events(event_id, asset_id, event_time, shift, payload_json)
+                INSERT INTO sensor_events(event_id, asset_id, event_time, shift, payload_json)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    asset_id = excluded.asset_id,
+                    event_time = excluded.event_time,
+                    shift = excluded.shift,
+                    payload_json = excluded.payload_json
                 """,
                 (
                     event["event_id"],
@@ -84,10 +90,18 @@ class SQLiteRiskEventStore:
             )
             connection.execute(
                 """
-                INSERT OR REPLACE INTO risk_predictions(
+                INSERT INTO risk_predictions(
                     event_id, model_version, policy_version, risk_score,
                     reliability_status, action, queue_eligible, observed_conditions_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    model_version = excluded.model_version,
+                    policy_version = excluded.policy_version,
+                    risk_score = excluded.risk_score,
+                    reliability_status = excluded.reliability_status,
+                    action = excluded.action,
+                    queue_eligible = excluded.queue_eligible,
+                    observed_conditions_json = excluded.observed_conditions_json
                 """,
                 (
                     event["event_id"],

@@ -6,11 +6,31 @@ import json
 import logging
 import os
 import random
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 # Khởi tạo logger hệ thống
 LOGGER = logging.getLogger("ai_predictive_maintenance")
+
+
+def normalize_event_time(value: str | None) -> str | None:
+    """Chuẩn hóa thời gian có timezone về ISO-8601 UTC dạng hậu tố `Z`."""
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("event_time phải là chuỗi ISO-8601 hợp lệ.") from exc
+
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("event_time phải kèm timezone, ví dụ `2026-09-07T10:15:00Z`.")
+
+    return parsed.astimezone(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
+        "+00:00", "Z"
+    )
 
 
 def setup_logging() -> None:

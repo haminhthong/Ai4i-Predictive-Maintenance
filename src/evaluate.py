@@ -213,7 +213,7 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
     fn_w = float(cost_weights.get("false_negative", 5.0))
     fp_w = float(cost_weights.get("false_positive", 1.0))
 
-    primary_thresh = float(policy.get("primary_alert_threshold", 0.3574))
+    primary_thresh = float(policy.get("primary_alert_threshold", 0.5))
     LOGGER.info(
         f"Áp dụng ngưỡng đã đóng băng từ Policy Validation: {primary_thresh:.4f}"
     )
@@ -228,7 +228,7 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
     # LƯU Ý: Tất cả các ngưỡng đều được lấy từ frozen_thresholds, TUYỆT ĐỐI KHÔNG TỐI ƯU TRÊN TEST!
     threshold_candidates = {
         "fixed_0_50": frozen_thresholds.get("fixed_0_50", 0.50),
-        "max_f1_validation_tuned": frozen_thresholds.get("max_f1_validation", 0.3965),
+        "max_f1_validation_tuned": frozen_thresholds.get("max_f1_validation", 0.5),
         "cost_sensitive_validation_tuned": primary_thresh,
         "capacity_constrained_5pct": frozen_thresholds.get("capacity_constrained_5pct", primary_thresh),
         "capacity_constrained_3pct": frozen_thresholds.get("capacity_constrained_3pct", primary_thresh),
@@ -307,7 +307,6 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
         (REPORTS_DIR / "final_test_metrics.json", final_test_report),
         (REPORTS_DIR / "failure_mode_analysis.json", failure_slices),
         (REPORTS_DIR / "twf_error_analysis.json", twf_error_analysis),
-        (REPORTS_DIR / "test_metrics.json", final_test_report),
     ):
         try:
             save_json(report_path, report)

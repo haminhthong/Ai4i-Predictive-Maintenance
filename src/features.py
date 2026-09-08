@@ -17,6 +17,7 @@ import pandas as pd
 from .contracts import (
     ENGINEERED_FEATURES,
     MODEL_FEATURE_CONTRACT,
+    RAW_SENSOR_FEATURES,
     RAW_TO_CANONICAL_COLUMN_MAP,
     VALID_QUALITY_TYPES,
 )
@@ -56,6 +57,14 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         merged = pd.DataFrame(index=clean_df.index)
         for column in dict.fromkeys(clean_df.columns):
             duplicate_values = clean_df.loc[:, clean_df.columns == column]
+            non_null_values = duplicate_values.dropna(axis=1, how="all")
+            if non_null_values.shape[1] > 1:
+                conflicting_rows = non_null_values.nunique(axis=1, dropna=True) > 1
+                if conflicting_rows.any():
+                    raise ValueError(
+                        f"Các alias của cột '{column}' chứa giá trị mâu thuẫn "
+                        f"tại dòng: {list(conflicting_rows[conflicting_rows].index[:5])}."
+                    )
             merged[column] = duplicate_values.bfill(axis=1).iloc[:, 0]
         clean_df = merged
 
@@ -155,8 +164,10 @@ def build_canonical_features(
     """
     clean_df = canonicalize_raw_dataframe(df)
 
-    # Nếu chưa có các cột engineered features, tính toán bổ sung
-    if not all(col in clean_df.columns for col in ENGINEERED_FEATURES):
+    # Khi có raw sensor, luôn tính lại engineered features để caller không thể
+    # gửi giá trị dẫn xuất sai hoặc tạo train-serving skew.
+    has_raw_sensor = all(col in clean_df.columns for col in RAW_SENSOR_FEATURES)
+    if has_raw_sensor or not all(col in clean_df.columns for col in ENGINEERED_FEATURES):
         clean_df = add_engineered_features(clean_df)
 
     # Chỉ chọn và sắp xếp các cột theo đúng Feature Contract

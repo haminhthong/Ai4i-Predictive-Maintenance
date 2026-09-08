@@ -20,6 +20,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from .contracts import VALID_QUALITY_TYPES
 from .inference import RiskInferenceService
+from .utils import normalize_event_time
 
 LOGGER = logging.getLogger("ai_predictive_maintenance.api")
 
@@ -104,13 +105,7 @@ class SensorPayload(BaseModel):
     @classmethod
     def validate_event_time(cls, value: str | None) -> str | None:
         """Chỉ nhận event time dạng ISO-8601 nếu metadata được gửi lên."""
-        if value is None:
-            return value
-        try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValueError("event_time phải là chuỗi ISO-8601 hợp lệ.") from exc
-        return value
+        return normalize_event_time(value)
 
     @property
     def machine_type(self) -> str:
@@ -264,13 +259,7 @@ class MaintenanceReviewRequest(BaseModel):
     @classmethod
     def validate_reviewed_at(cls, value: str | None) -> str | None:
         """Kiểm tra thời điểm review nếu client gửi lên."""
-        if value is None:
-            return value
-        try:
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValueError("reviewed_at phải là chuỗi ISO-8601 hợp lệ.") from exc
-        return value
+        return normalize_event_time(value)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +292,7 @@ def readiness_check() -> dict[str, Any]:
                 "torque_nm": 40.0,
                 "tool_wear_min": 10.0,
             }
-            res = service.predict(test_sample)
+            res = service.predict(test_sample, persist_event=False)
             test_passed = "risk" in res and res["reliability"]["status"] != "UNAVAILABLE"
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
             LOGGER.error(f"Readiness test cycle failed: {exc}")

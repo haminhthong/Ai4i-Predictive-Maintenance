@@ -11,7 +11,7 @@ model_development:
       locked_test: 0.15
 
   feature_contract:
-    version: "ai4i-canonical-v2"
+    version: "ai4i-canonical-v3"
     categorical:
       - quality_type
     numeric:
@@ -35,4 +35,4 @@ model_development:
     secondary_metric: "brier_score"
     pr_auc_tolerance: 0.01
 
-  artifacts_destination: "artifacts/champion"
+  artifacts_destination: "releases"

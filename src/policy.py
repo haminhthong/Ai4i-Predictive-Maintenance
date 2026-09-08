@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -245,18 +245,22 @@ def build_maintenance_queue(
 
     latest_by_asset: dict[str, dict[str, Any]] = {}
 
-    def event_key(event: dict[str, Any]) -> tuple[int, str]:
+    def event_key(event: dict[str, Any]) -> datetime:
         value = str(event.get("event_time", ""))
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return (1, parsed.isoformat())
-        except ValueError:
-            return (0, value)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("event_time phải có timezone.")
+        return parsed.astimezone(timezone.utc)  # noqa: UP017 - tương thích Python 3.10
 
     for raw_event in risk_events:
         event = dict(raw_event)
         asset_id = str(event.get("asset_id", "")).strip()
         if not asset_id:
+            continue
+        try:
+            event_key(event)
+        except (TypeError, ValueError):
+            # Event không có timestamp hợp lệ không được đưa vào lịch bảo trì.
             continue
         if str(event.get("reliability_status", "NOMINAL")) == "UNAVAILABLE":
             continue

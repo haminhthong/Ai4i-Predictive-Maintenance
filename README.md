@@ -123,7 +123,7 @@ flowchart TD
 ### Luồng dữ liệu online
 
 1. `/score` nhận sensor snapshot cùng metadata runtime.
-2. API chuẩn hóa `product_quality_type` về `quality_type`; alias cũ vẫn được nhận để tương thích.
+2. API chuẩn hóa `product_quality_type` về `quality_type`; alias cũ vẫn được nhận để tương thích. `event_time` phải có timezone và được chuẩn hóa về UTC.
 3. Inference gọi cùng feature builder với training, chạy model/calibration trong release mới nhất.
 4. Reliability gate so với `reference_distribution.json`:
    - `NOMINAL`: nằm trong guardrail tham chiếu.
@@ -188,7 +188,7 @@ Thứ tự feature là một phần của contract và được kiểm tra khi r
 
 Response canonical có `risk.snapshot_failure_risk`, `reliability.status`, `triage.action`, `queue_eligible` và `observed_conditions`. Các block legacy như `prediction`, `decision` và `operational_context` vẫn được giữ để client cũ migrate dần.
 
-SQLite runtime mặc định là `data/runtime/risk_events.sqlite3`; có thể đổi bằng biến môi trường `RISK_EVENT_DB_PATH`. Thư mục runtime và database không phải source artifact, đã được loại khỏi Git.
+SQLite runtime mặc định là `data/runtime/risk_events.sqlite3`; có thể đổi bằng biến môi trường `RISK_EVENT_DB_PATH`. Thư mục runtime và database không phải source artifact, đã được loại khỏi Git. Readiness probe và dashboard không ghi event giả vào store.
 
 ## Release và báo cáo
 

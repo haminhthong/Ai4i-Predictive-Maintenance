@@ -33,6 +33,35 @@ DEFAULT_SPLIT_MANIFEST_PATH = Path("reports/split_manifest.json")
 DEFAULT_AUDIT_REPORT_PATH = Path("reports/data_audit.json")
 
 
+def _is_valid_split_registry(registry: dict[str, Any], total_rows: int, seed: int) -> bool:
+    """Kiểm tra split manifest đủ index, không chồng lấn và bao phủ toàn bộ dữ liệu."""
+    expected_fractions = {
+        "development": 0.70,
+        "policy_validation": 0.15,
+        "locked_test": 0.15,
+    }
+    expected_counts = {
+        "development": len(registry.get("development_indices", [])),
+        "policy_validation": len(registry.get("policy_indices", [])),
+        "test": len(registry.get("test_indices", [])),
+    }
+    groups = [
+        registry.get("development_indices", []),
+        registry.get("policy_indices", []),
+        registry.get("test_indices", []),
+    ]
+    flattened = [index for group in groups for index in group]
+
+    return (
+        registry.get("seed") == seed
+        and registry.get("split_fractions") == expected_fractions
+        and registry.get("split_counts") == expected_counts
+        and len(flattened) == total_rows
+        and len(set(flattened)) == total_rows
+        and set(flattened) == set(range(total_rows))
+    )
+
+
 def compute_dataset_sha256(path: str | Path) -> str:
     """Tính mã băm SHA256 của tệp dữ liệu CSV để đảm bảo tính tái lập (Reproducibility)."""
     csv_path = Path(path)
@@ -147,20 +176,10 @@ def create_or_load_split_registry(
             with path.open("r", encoding="utf-8") as f:
                 registry = json.load(f)
             required_keys = {"development_indices", "policy_indices", "test_indices"}
-            if required_keys <= set(registry.keys()):
-                # Kiểm tra số lượng index khớp với số dòng
-                total_manifest = (
-                    len(registry["development_indices"])
-                    + len(registry["policy_indices"])
-                    + len(registry["test_indices"])
-                )
-                fractions = registry.get("split_fractions", {})
-                if total_manifest == len(df) and fractions == {
-                    "development": 0.70,
-                    "policy_validation": 0.15,
-                    "locked_test": 0.15,
-                }:
-                    return registry
+            if required_keys <= set(registry.keys()) and _is_valid_split_registry(
+                registry, total_rows=len(df), seed=seed
+            ):
+                return registry
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             LOGGER.warning(f"Không thể đọc manifest hiện có, tạo lại: {exc}")
 
@@ -245,8 +264,13 @@ def load_data(
     raw_df = load_raw_dataset(path)
     clean_df = canonicalize_raw_dataframe(raw_df)
 
+    if TARGET_COLUMN not in clean_df.columns:
+        raise KeyError(f"Dataset thiếu cột target bắt buộc: {TARGET_COLUMN}")
+
     # 1. Tách nhãn chính
     labels = clean_df[TARGET_COLUMN].astype(int)
+    if not labels.isin({0, 1}).all():
+        raise ValueError("Target machine_failure chỉ được chứa giá trị 0 hoặc 1.")
 
     # 2. Tách metadata chế độ hỏng hóc (dành riêng cho error analysis)
     metadata_cols = [c for c in FAILURE_MODE_COLUMNS if c in clean_df.columns]

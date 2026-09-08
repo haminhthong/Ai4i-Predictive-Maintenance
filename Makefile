@@ -41,7 +41,7 @@ full-pipeline: download train evaluate
 	@echo "[OK] Full pipeline hoàn tất!"
 	@echo "     - Dữ liệu: data/raw/ai4i2020.csv"
 	@echo "     - Model:   models/model.joblib"
-	@echo "     - Reports: reports/validation_metrics.json + reports/test_metrics.json"
+	@echo "     - Reports: reports/validation_metrics.json + reports/final_test_metrics.json"
 
 serve:
 	python -m uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload

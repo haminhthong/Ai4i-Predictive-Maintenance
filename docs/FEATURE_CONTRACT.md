@@ -51,13 +51,14 @@ wear_load_interaction = tool_wear_min * torque_nm
 6. Gửi DataFrame đó vào preprocessing pipeline của model.
 
 Training và inference đều gọi cùng builder. Không tạo feature thủ công riêng trong API hoặc dashboard.
+Khi raw sensor có mặt, builder luôn tính lại ba engineered features; giá trị engineered do caller gửi lên không được tin cậy.
 
 ## 4. Validation và missing data
 
 - Header phải map được vào canonical name.
 - `quality_type` không hợp lệ bị từ chối.
 - Field số phải chuyển được sang numeric và không được chứa giá trị thiếu sau bước chuẩn hóa.
-- API kiểm tra ISO-8601 cho `event_time` nếu trường này được cung cấp.
+- API yêu cầu `event_time` có timezone nếu trường này được cung cấp và chuẩn hóa về UTC.
 - Nếu release thiếu reference distribution hoặc không verify được checksum, inference chuyển sang `UNAVAILABLE`; hệ thống fail-closed và không phát `NO_ALERT`.
 
 ## 5. Leakage boundary
