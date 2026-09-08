@@ -1,111 +1,175 @@
 # AI4I Condition-Based Maintenance Risk Triage
 
-Đây là hệ thống triage bảo trì dựa trên trạng thái vận hành hiện tại của một operating snapshot AI4I.
-Hệ thống nhận event cảm biến, kiểm tra chất lượng dữ liệu, tính risk score đã calibration, rồi xếp tài sản vào maintenance queue theo capacity.
+[![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 
-Risk score có nghĩa là:
+Hệ thống này nhận một operating snapshot của máy, tính rủi ro hỏng hóc đã hiệu chuẩn, kiểm tra độ tin cậy của dữ liệu cảm biến và đưa ra quyết định triage theo năng lực xử lý của đội bảo trì.
 
-> Mức rủi ro gắn với trạng thái vận hành của snapshot hiện tại dưới phân bố AI4I.
+> **Scope:** condition-based snapshot risk triage. This project does not estimate RUL, time-to-failure or future failure probability.
 
-Score không phải xác suất máy sẽ hỏng trong tương lai, không dự báo thời điểm hỏng, không dự báo RUL và không xác nhận được “hỏng trong 24 giờ tới”.
-AI4I là dữ liệu snapshot i.i.d.; repo không claim temporal generalization hay future unseen machines.
+## Kết quả đã khóa
 
-## Luồng logic
+Các số liệu dưới đây được đọc từ release Random Forest mới nhất và `reports/final_test_metrics.json`. Locked Test chỉ dùng để báo cáo sau khi model, calibration và policy đã được đóng băng.
 
-```text
-OFFLINE
-AI4I raw snapshot
-    -> schema/audit + SHA256
-    -> quarantine target, identifier và failure-mode metadata
-    -> shared feature contract
-    -> Development 70%
-    -> 5-fold Stratified CV: Logistic / Random Forest / HistGB
-    -> chọn production candidate
-    -> sigmoid calibration trên Development
-    -> Policy Validation 15%: freeze policy và queue policy
-    -> Locked Test 15%: report only
-    -> immutable release bundle + SHA256 manifest
+### Locked Test
 
-ONLINE
-sensor event + asset/time metadata
-    -> schema và hard physical limits
-    -> shared feature builder
-    -> snapshot_failure_risk
-    -> reliability gate: NOMINAL / DEGRADED / UNAVAILABLE
-    -> risk event store
-    -> latest valid event / asset
-    -> sort risk giảm dần
-    -> top-K queue + priority override
-    -> technician review -> offline outcome monitoring/retraining
+| Metric | Result |
+|---|---:|
+| PR-AUC | 0.9302 |
+| ROC-AUC | 0.9794 |
+| Brier | 0.0055 |
+| ECE | 0.0080 |
+| Precision | 0.807 |
+| Recall | 0.902 |
+
+### Critical slices
+
+| Failure Mode | Recall | Detected / Total |
+|---|---:|---:|
+| TWF | 20% | 1 / 5 |
+| HDF | 100% | 21 / 21 |
+| PWF | 100% | 11 / 11 |
+| OSF | 100% | 15 / 15 |
+| RNF | 0% | 0 / 1 |
+
+Các slice này được đặt ngay cạnh headline metric để không cherry-pick kết quả tổng thể. TWF là giới hạn quan trọng của sensor contract hiện tại; RNF không có precursor đáng tin trong dữ liệu snapshot.
+
+### Operations metrics
+
+| Metric | Locked Test | Cách đọc |
+|---|---:|---|
+| Failure Capture@1% | 29.41% | Tỷ lệ failure nằm trong 1% snapshot có risk cao nhất |
+| Failure Capture@2% | 58.82% | Tỷ lệ failure nằm trong 2% snapshot có risk cao nhất |
+| Failure Capture@3% | 84.31% | Tỷ lệ failure nằm trong 3% snapshot có risk cao nhất |
+| Queue Precision@1% | 100.00% | Tỷ lệ failure trong queue top 1% |
+| Queue Precision@2% | 100.00% | Tỷ lệ failure trong queue top 2% |
+| Queue Precision@3% | 95.56% | Tỷ lệ failure trong queue top 3% |
+| Review Coverage | 3.80% | Tỷ lệ snapshot vượt ngưỡng review chính |
+| Priority Override Rate | 85.96% | Tỷ lệ event review đạt ngưỡng priority trong nhóm review |
+
+Các metric trên được tính bằng `src/policy.py` và ghi vào `test_performance` bởi `src/evaluate.py`. Đây là benchmark trên Locked Test, không phải cam kết công suất cho một nhà máy khác.
+
+## Bài toán & phạm vi ứng dụng
+
+### Bài toán
+
+AI4I 2020 cung cấp các snapshot vận hành gồm nhiệt độ, tốc độ quay, mô-men xoắn, thời gian mòn dụng cụ và loại chất lượng sản phẩm. Mục tiêu là phân loại `machine_failure` tại chính snapshot đó, sau đó chuyển xác suất đã hiệu chuẩn thành hành động vận hành:
+
+- `NO_ALERT`: không đưa vào queue.
+- `REVIEW_REQUIRED`: cần kỹ thuật viên kiểm tra.
+- `PRIORITY_REVIEW`: ưu tiên cao và được giữ lại như priority override.
+
+Điểm `snapshot_failure_risk` chỉ mô tả rủi ro của trạng thái hiện tại dưới phân bố AI4I. Nó không phải RUL, time-to-failure, forecast theo thời gian hay xác suất máy sẽ hỏng trong một horizon tương lai.
+
+### Dataset Card
+
+| Thuộc tính | Giá trị |
+|---|---|
+| Dataset | AI4I 2020 Predictive Maintenance Dataset |
+| Problem | `machine_failure` classification |
+| Observation unit | Một operating snapshot |
+| Quy mô | 10.000 dòng, 339 failure (3,39%) |
+| Temporal ordering | Unavailable |
+| Split | Stratified random: Development 70%, Policy Validation 15%, Locked Test 15% |
+| Leakage boundary | Loại `UDI`, `Product ID`; cách ly TWF/HDF/PWF/OSF/RNF khỏi feature |
+| Generalization claim | i.i.d. snapshot generalization trong phân bố benchmark AI4I |
+
+Do dataset không có event-time trajectory đáng tin cậy, repo không đưa ra temporal validation hay claim cho future unseen machines.
+
+## Luồng logic, luồng dữ liệu và quy trình kỹ thuật duy nhất
+
+Sơ đồ dưới đây là contract cấp hệ thống. Offline training, online API, release artifact, monitoring và báo cáo đều phải tuân theo cùng một thứ tự; không có nhánh nào được dùng target-derived metadata để suy luận.
+
+```mermaid
+flowchart TD
+    RAW["AI4I 2020 raw snapshot"] --> AUDIT["Schema audit + SHA256 + missing/duplicate check"]
+    AUDIT --> QUARANTINE["Quarantine target, IDs, failure-mode metadata"]
+    QUARANTINE --> SPLIT["Stratified registry: Development 70% / Policy 15% / Locked Test 15%"]
+    SPLIT --> CV["Development: 5-fold Stratified CV"]
+    CV --> CANDIDATES["Compare Logistic Regression / Random Forest / HistGradientBoosting"]
+    CANDIDATES --> CHAMPION["Select production candidate by PR-AUC tolerance"]
+    CHAMPION --> CALIBRATION["Fit sigmoid calibration on Development only"]
+    CALIBRATION --> POLICY_VAL["Policy Validation only: freeze thresholds, cost and critical escalation"]
+    POLICY_VAL --> RELEASE["Self-contained release: model + calibration + contract + policy + reference + hashes"]
+    RELEASE --> LOCKED["Locked Test: report only, no model/policy tuning"]
+    LOCKED --> REPORTS["Metrics, failure-mode slices, operations metrics"]
+
+    SENSOR["Sensor/MES event + asset/time metadata"] --> CONTRACT["Canonical schema + physical validation"]
+    CONTRACT --> FEATURES["Shared feature builder: 6 raw + 3 engineered"]
+    FEATURES --> RISK["ML RISK LAYER: calibrated snapshot_failure_risk"]
+    RISK --> RELIABILITY["RELIABILITY LAYER: NOMINAL / DEGRADED / UNAVAILABLE"]
+    RELIABILITY --> DECISION["DECISION POLICY: NO_ALERT / REVIEW_REQUIRED / PRIORITY_REVIEW"]
+    DECISION --> STORE[("SQLite risk event store")]
+    STORE --> QUEUE["CAPACITY-AWARE QUEUE: latest valid event per asset -> top-K"]
+    QUEUE --> TECHNICIAN["Technician review"]
+    TECHNICIAN --> OUTCOME[("Maintenance outcome feedback")]
+    OUTCOME --> MONITOR["Monitoring + offline QA / retraining trigger"]
+    MONITOR -. "Không tự retrain trực tiếp" .-> CV
+
+    RELEASE -. "Readiness checksum + contract" .-> RELIABILITY
+    QUARANTINE -. "Evaluation metadata only" .-> REPORTS
 ```
 
-## Data contract
+### Luồng dữ liệu offline
 
-API dùng `product_quality_type` với giá trị `L`, `M`, `H`. Đây là chất lượng sản phẩm của AI4I, không phải machine identity.
-Trong feature contract nội bộ, trường này được canonical thành `quality_type` để khớp dữ liệu gốc.
+1. `src.data.load_raw_dataset()` đọc `data/raw/ai4i2020.csv`.
+2. `audit_dataset()` canonicalize header, kiểm tra missing/duplicate, prevalence và SHA256.
+3. `create_or_load_split_registry()` giữ index stratified cố định. Manifest cũ sai contract sẽ được tạo lại.
+4. `build_canonical_features()` tạo đúng 9 model features; target, ID và failure mode không lọt vào vector.
+5. Development dùng 5-fold CV để so sánh ba base model.
+6. Model được chọn trước khi calibration. Calibration là stage riêng, rồi mới dùng Policy Validation để đóng băng policy.
+7. Locked Test chỉ được mở ở bước đánh giá cuối; ngưỡng không được tìm kiếm trên test.
+8. `src.evaluate` ghi báo cáo và cập nhật `locked_test_metrics.json` trong release hiện hành.
 
-Metadata runtime gồm `event_id`, `asset_id`, `event_time`, `line_id`, `sensor_source` và `shift`.
-Metadata được dùng để logging, monitoring, queueing và maintenance history; không đi vào model features.
+### Luồng dữ liệu online
 
-Model chỉ nhận 9 features theo đúng thứ tự:
+1. `/score` nhận sensor snapshot cùng metadata runtime.
+2. API chuẩn hóa `product_quality_type` về `quality_type`; alias cũ vẫn được nhận để tương thích.
+3. Inference gọi cùng feature builder với training, chạy model/calibration trong release mới nhất.
+4. Reliability gate so với `reference_distribution.json`:
+   - `NOMINAL`: nằm trong guardrail tham chiếu.
+   - `DEGRADED`: có feature ngoài guardrail; vẫn chấm điểm nhưng phải lưu warning.
+   - `UNAVAILABLE`: thiếu reference hoặc bundle không sẵn sàng; fail-closed, buộc review và không cho `NO_ALERT`.
+5. Policy ánh xạ risk thành action. Risk event và prediction được lưu vào SQLite.
+6. Queue lấy event hợp lệ mới nhất của từng `asset_id`, giữ toàn bộ `PRIORITY_REVIEW`, rồi lấy top-K event `REVIEW_REQUIRED` theo risk giảm dần.
+7. Review của kỹ thuật viên chỉ là outcome feedback cho QA/retraining offline, không cập nhật model ngay trong request.
 
-```text
-quality_type
-air_temperature_k
-process_temperature_k
-rotational_speed_rpm
-torque_nm
-tool_wear_min
-temperature_delta_k
-mechanical_power_w
-wear_load_interaction
-```
+## Feature contract
 
-Ba engineered features là domain-informed operating-state features:
+README chỉ giữ tóm tắt để dễ đọc. Hợp đồng đầy đủ, công thức và leakage boundary nằm tại [docs/FEATURE_CONTRACT.md](docs/FEATURE_CONTRACT.md).
 
-```text
-temperature_delta_k   = process_temperature_k - air_temperature_k
-mechanical_power_w    = torque_nm * rotational_speed_rpm * 2π / 60
-wear_load_interaction = tool_wear_min * torque_nm
-```
+Model nhận **6 raw operating variables + 3 domain-informed engineered features**:
 
-`mechanical_power_w` là đại lượng vật lý; `wear_load_interaction` là engineering proxy, không phải causal failure model.
-Các cột `machine_failure`, `UDI`, `Product ID`, `TWF`, `HDF`, `PWF`, `OSF`, `RNF` không được đưa vào inference feature vector.
-Failure-mode flags là target-derived diagnostic labels chỉ dùng cho offline slice analysis.
+- Raw: `quality_type`, `air_temperature_k`, `process_temperature_k`, `rotational_speed_rpm`, `torque_nm`, `tool_wear_min`.
+- Engineered: `temperature_delta_k`, `mechanical_power_w`, `wear_load_interaction`.
 
-## Model lifecycle
+Thứ tự feature là một phần của contract và được kiểm tra khi readiness. Runtime metadata (`event_id`, `asset_id`, `event_time`, `line_id`, `sensor_source`, `shift`) chỉ dùng cho traceability, monitoring và queue.
 
-- Development 70%: dùng 5-fold Stratified CV để so sánh base models, raw/engineered contract và calibration.
-- Policy Validation 15%: chỉ dùng để đóng băng threshold triage và policy vận hành.
-- Locked Test 15%: chỉ report, không chọn model, feature hay threshold.
-- Split hiện tại là `stratified_random`, không phải temporal validation.
-- Production candidate là Random Forest khi PR-AUC nằm trong tolerance 0.01 của ứng viên tốt nhất; Logistic là baseline và HistGradientBoosting là challenger.
-- Calibration là stage riêng: Random Forest -> sigmoid cross-fitted calibration -> risk score.
+## Model, calibration và policy
 
-### Reliability gate
+- **Base model:** Logistic Regression là baseline; Random Forest và HistGradientBoosting là các ứng viên production/challenger.
+- **Selection:** 5-fold Stratified CV trên Development, ưu tiên PR-AUC; Random Forest được chọn khi nằm trong tolerance 0,01 so với ứng viên tốt nhất.
+- **Calibration:** sigmoid cross-fitted calibration, fit trong Development.
+- **Policy:** cost-sensitive với `FN=5`, `FP=1`; ngưỡng chính và ngưỡng priority chỉ được tìm trên Policy Validation.
+- **Capacity:** policy lưu các kịch bản 5%, 3% và 2%; queue runtime vẫn áp dụng `capacity` thực tế từ request.
+- **Monitoring:** PSI/guardrail chỉ tạo tín hiệu điều tra; không tự động retrain vì drift có thể đến từ regime, vật liệu, cảm biến hoặc maintenance event.
 
-P0.5–P99.5 chỉ là univariate distribution range guardrail, không phải OOD probability hay model uncertainty.
+`releases/<model_version>/` là nguồn artifact runtime chuẩn. `artifacts/champion/` và `models/` chỉ là mirror chuyển tiếp cho client cũ.
 
-- `NOMINAL`: reference distribution tồn tại và snapshot nằm trong dải tham chiếu.
-- `DEGRADED`: có cảm biến nằm ngoài dải tham chiếu.
-- `UNAVAILABLE`: thiếu reference distribution; hệ thống fail-closed, yêu cầu review và không phát `NO_ALERT`.
+## API và dữ liệu runtime
 
-Reason/observed conditions như `TOOL_WEAR_HIGH` hoặc `TORQUE_HIGH` là heuristic vận hành độc lập.
-Chúng không phải explanation của Random Forest. Model attribution nếu cần chỉ thực hiện offline.
+### Endpoint
 
-## Maintenance queue
+| Method | Path | Mục đích |
+|---|---|---|
+| GET | `/health/live` | Liveness probe |
+| GET | `/health/ready` | Kiểm tra release, hash, contract, reference và sample inference |
+| GET | `/health` | Trạng thái tổng quát, tương thích ngược |
+| POST | `/score` | Endpoint canonical chấm điểm snapshot |
+| POST | `/predict-risk` | Alias tương thích cho `/score` |
+| POST | `/maintenance/queue/build` | Dựng queue theo capacity và shift |
+| POST | `/maintenance/reviews` | Ghi feedback kỹ thuật viên |
 
-`POST /maintenance/queue/build` không dùng một threshold cố định để giả vờ capacity-aware.
-Queue lấy event hợp lệ mới nhất của mỗi asset, giữ toàn bộ `PRIORITY_REVIEW` như priority override, sau đó xếp `REVIEW_REQUIRED` theo risk giảm dần và lấy tối đa `capacity` event.
-
-Risk events và prediction được lưu trong SQLite tại `data/runtime/risk_events.sqlite3` mặc định; có thể đổi bằng biến môi trường `RISK_EVENT_DB_PATH`.
-Technician review là dữ liệu feedback cho offline QA và retraining, không retrain trực tiếp khi người dùng click.
-
-## API
-
-### Chấm điểm snapshot
-
-`POST /score` là endpoint canonical. `/predict-risk` được giữ làm alias tương thích.
+### Request mẫu
 
 ```json
 {
@@ -122,58 +186,13 @@ Technician review là dữ liệu feedback cho offline QA và retraining, không
 }
 ```
 
-Response canonical gồm `risk`, `reliability`, `triage` và `observed_conditions`:
+Response canonical có `risk.snapshot_failure_risk`, `reliability.status`, `triage.action`, `queue_eligible` và `observed_conditions`. Các block legacy như `prediction`, `decision` và `operational_context` vẫn được giữ để client cũ migrate dần.
 
-```json
-{
-  "event_id": "evt_123",
-  "asset_id": "MACHINE_042",
-  "risk": {
-    "snapshot_failure_risk": 0.684,
-    "model_version": "ai4i-risk-v3.0.0"
-  },
-  "reliability": {
-    "status": "NOMINAL",
-    "distribution_warning": false,
-    "warning_features": []
-  },
-  "triage": {
-    "priority": "HIGH",
-    "queue_eligible": true,
-    "policy_version": "maintenance-policy-v2"
-  },
-  "observed_conditions": ["TOOL_WEAR_HIGH"]
-}
-```
+SQLite runtime mặc định là `data/runtime/risk_events.sqlite3`; có thể đổi bằng biến môi trường `RISK_EVENT_DB_PATH`. Thư mục runtime và database không phải source artifact, đã được loại khỏi Git.
 
-Các block cũ `prediction`, `decision`, `operational_context` và trường phẳng cũ vẫn được trả về để client cũ migrate dần.
+## Release và báo cáo
 
-### Dựng queue
-
-`POST /maintenance/queue/build`
-
-```json
-{
-  "shift": "2026-09-07-NIGHT",
-  "capacity": 30
-}
-```
-
-`capacity=30` giới hạn queue thường ở 30; số lượng có thể lớn hơn chỉ khi có priority override rõ ràng.
-Event dùng để dựng queue phải có cùng `shift` với request queue; event không có shift sẽ không bị xếp nhầm vào scheduling window.
-
-`POST /maintenance/reviews` lưu `technician_action`, `confirmed_issue`, `failure_mode` và ghi chú vào `maintenance_reviews`.
-Review chỉ tạo dữ liệu outcome cho QA/retraining offline; API không cập nhật model ngay lập tức.
-
-### Health
-
-- `GET /health/live`: tiến trình còn sống.
-- `GET /health/ready`: kiểm tra model, release checksum, feature contract, reference distribution và sample inference.
-- `GET /health`: trạng thái tổng quát.
-
-## Release bundle
-
-Mỗi release nằm trong `releases/<version>/` và tự chứa:
+Mỗi release tự chứa:
 
 ```text
 model.joblib
@@ -189,62 +208,134 @@ MODEL_CARD.md
 manifest.json
 ```
 
-`manifest.json` lưu SHA256 cho model, contract, policy, reference distribution và toàn bộ file thành phần.
-Nếu hash mismatch, thiếu file, contract sai thứ tự hoặc thiếu reference distribution thì readiness không đạt.
-Thư mục `artifacts/champion` và `models` chỉ là mirror migration cho client cũ; release bundle mới là nguồn chuẩn.
+`manifest.json` chứa SHA256 của model, contract, policy, reference và các file thành phần. Readiness fail-closed khi bundle thiếu file, hash sai, contract sai thứ tự hoặc không có reference distribution.
 
-## Báo cáo hiện tại
+Báo cáo quan trọng:
 
-Locked Test mới nhất của release Random Forest có:
+- `reports/data_audit.json`: chất lượng dữ liệu và leakage boundary.
+- `reports/split_manifest.json`: index và tỷ lệ split cố định.
+- `reports/validation_metrics.json`: CV leaderboard và policy validation.
+- `reports/final_test_metrics.json`: Locked Test, slice và operations metrics.
+- `reports/failure_mode_analysis.json`: recall theo TWF/HDF/PWF/OSF/RNF.
+- `reports/twf_error_analysis.json`: phân tích snapshot TWF detected/missed.
 
-- PR-AUC: `0.9302`
-- ROC-AUC: `0.9794`
-- Brier: `0.0055`
-- ECE: `0.0080`
-- Precision: `0.8070`
-- Recall: `0.9020`
-
-Slice limitation cần đọc cùng overall metrics:
-
-- TWF recall: `20%` — detector yếu với tool-wear-related failures.
-- RNF recall: `0%` — xem là out-of-model scope vì không có precursor đáng tin trong sensor contract.
-- HDF/PWF/OSF được báo cáo riêng trong `reports/failure_mode_analysis.json`.
-- So sánh TWF detected/missed nằm trong `reports/twf_error_analysis.json`.
-
-Metric headline cho maintenance là PR-AUC và Failure Capture@K; F1 chỉ là metric phụ.
-PSI hoặc drift không tự động retrain. Drift chỉ tạo trigger điều tra vì có thể do regime mới, vật liệu, calibration sensor hoặc maintenance event.
-
-## Chạy dự án
-
-```bash
-pip install -r requirements.txt
-python -m src.train
-python -m src.evaluate
-uvicorn src.api:app --reload
-streamlit run app.py
-pytest -q
-```
-
-Nếu dùng runtime Python bundled của Codex, thay `python` bằng đường dẫn Python tương ứng của workspace.
-
-## Cấu trúc chính
+## Cấu trúc thư mục dự án
 
 ```text
-src/
-  artifact.py       # release và checksum
-  contracts.py      # canonical schema và leakage boundary
-  data.py           # audit và Development/Policy/Test split
-  features.py       # shared feature builder
-  models.py         # preprocessing, candidates và metrics
-  train.py          # CV -> policy validation -> release
-  evaluate.py       # locked test report only
-  policy.py         # triage và top-K queue
-  inference.py      # risk snapshot -> triage -> event
-  monitoring.py     # guardrail, PSI, runtime workload
-  storage.py        # SQLite event store
-  api.py            # FastAPI
-app.py              # Streamlit dashboard
-releases/           # immutable self-contained bundles
-reports/            # validation, locked test và error analysis
-tests/              # architectural invariants và integration tests
+Predictive-Maintenance-Ai4i/
+├── app.py                         # Streamlit dashboard
+├── configs/
+│   ├── model.yaml                 # Cấu hình tham chiếu model/split
+│   └── decision_policy.yaml       # Cấu hình tham chiếu policy/reliability
+├── data/
+│   ├── raw/ai4i2020.csv           # Dataset; tải bằng scripts nếu chưa có
+│   └── runtime/                    # SQLite runtime, không commit
+├── docs/
+│   └── FEATURE_CONTRACT.md        # Hợp đồng 9 features và leakage boundary
+├── releases/<model_version>/      # Bundle self-contained có checksum
+├── artifacts/champion/            # Mirror legacy JSON
+├── models/                        # Mirror legacy model/config
+├── reports/                       # Audit, validation, test và slice reports
+├── scripts/
+│   └── download_data.py           # Tải AI4I 2020 từ UCI
+├── src/
+│   ├── api.py                     # FastAPI endpoints
+│   ├── artifact.py                # Tìm và verify release bundle
+│   ├── contracts.py               # Schema canonical và leakage boundary
+│   ├── data.py                    # Audit, split registry, dataset loader
+│   ├── evaluate.py                # Locked Test report-only evaluation
+│   ├── features.py                # Feature builder dùng chung train/inference
+│   ├── inference.py               # Risk, reliability, triage và event
+│   ├── models.py                  # Pipeline, candidate models và metrics
+│   ├── monitoring.py              # Guardrail, PSI và workload monitoring
+│   ├── policy.py                  # Threshold, queue và operations metrics
+│   ├── storage.py                 # SQLite event/review store
+│   ├── train.py                   # CV -> calibration -> policy -> release
+│   └── utils.py                   # Logging, seed và JSON utilities
+├── tests/                         # Smoke, contract và integration tests
+├── requirements.txt
+├── Dockerfile
+├── Makefile
+└── README.md
 ```
+
+## Hướng dẫn cài đặt và chạy thử nghiệm
+
+### 1. Tạo môi trường và cài dependency
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Linux/macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Yêu cầu Python 3.10 trở lên. Nếu `data/raw/ai4i2020.csv` chưa tồn tại, tải dữ liệu:
+
+```bash
+python scripts/download_data.py
+```
+
+### 2. Chạy pipeline chuẩn
+
+```bash
+python -m src.train
+python -m src.evaluate
+```
+
+Pipeline sinh release mới, cập nhật mirror legacy và ghi báo cáo validation/test. Không chạy `evaluate` trước `train` nếu chưa có release hợp lệ.
+
+### 3. Chạy API và dashboard
+
+```bash
+uvicorn src.api:app --reload
+streamlit run app.py
+```
+
+API mặc định ở `http://127.0.0.1:8000`; tài liệu OpenAPI ở `/docs`. Dashboard mặc định ở `http://localhost:8501`.
+
+### 4. Kiểm tra code và logic
+
+```bash
+pytest -q
+python -m ruff check --no-cache src app.py tests scripts
+```
+
+Các test chính kiểm tra leakage boundary, alias schema, unavailable reliability, release hash, queue latest-per-asset, priority override và rejection của target/identifier trong direct inference.
+
+### 5. Chạy bằng Makefile
+
+```bash
+make setup
+make download
+make train
+make evaluate
+make test
+make serve
+make dashboard
+```
+
+## Giới hạn và cách diễn giải
+
+> **Scope:** đây là hệ thống triage rủi ro theo operating snapshot hiện tại. Không dùng kết quả để suy ra RUL, thời điểm hỏng, xác suất hỏng trong tương lai hoặc hiệu năng temporal ngoài AI4I.
+
+- Split là stratified random vì AI4I không có temporal ordering hợp lệ.
+- TWF và RNF là critical slices cần được giám sát riêng; overall PR-AUC không thay thế slice review.
+- `DEGRADED` là guardrail cảnh báo phân bố, không phải xác suất OOD hay uncertainty của model.
+- Failure-mode flags là metadata hậu nghiệm, chỉ dùng cho phân tích test; không được dùng làm input suy luận.
+- Review feedback hiện được lưu cho QA/offline retraining; không tự động thay đổi model trong production.
+
+## License
+
+Xem [LICENSE](LICENSE).

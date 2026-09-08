@@ -23,7 +23,7 @@ from .artifact import find_latest_release, sha256_file
 from .contracts import FAILURE_MODE_COLUMNS, FAILURE_MODE_DESCRIPTIONS
 from .data import load_data
 from .models import compute_calibration_curve_and_ece, compute_classification_metrics
-from .policy import failure_capture_at_k
+from .policy import failure_capture_at_k, queue_precision_at_k
 from .utils import LOGGER, save_json, setup_logging
 
 ARTIFACTS_DIR = Path("artifacts/champion")
@@ -284,6 +284,14 @@ def evaluate_model_on_locked_test() -> dict[str, Any]:
             "failure_capture_at_1pct": failure_capture_at_k(y_test_arr, y_probs, 0.01),
             "failure_capture_at_2pct": failure_capture_at_k(y_test_arr, y_probs, 0.02),
             "failure_capture_at_3pct": failure_capture_at_k(y_test_arr, y_probs, 0.03),
+            "queue_precision_at_1pct": queue_precision_at_k(y_test_arr, y_probs, 0.01),
+            "queue_precision_at_2pct": queue_precision_at_k(y_test_arr, y_probs, 0.02),
+            "queue_precision_at_3pct": queue_precision_at_k(y_test_arr, y_probs, 0.03),
+            "review_coverage": primary_metrics["alert_rate"],
+            "priority_override_rate": float(
+                np.sum(y_probs >= float(policy.get("critical_threshold", 0.75)))
+                / max(np.sum(y_probs >= primary_thresh), 1)
+            ),
         },
         "threshold_ablation_study": ablation_study,
         "failure_mode_analysis": failure_slices,

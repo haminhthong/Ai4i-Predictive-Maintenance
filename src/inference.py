@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -263,7 +263,9 @@ class RiskInferenceService:
         asset_id = str(raw_payload.get("asset_id") or "UNKNOWN_ASSET")
         event_time = str(
             raw_payload.get("event_time")
-            or datetime.now(UTC).isoformat().replace("+00:00", "Z")
+            or datetime.now(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
+                "+00:00", "Z"
+            )
         )
         model_version = str(self.manifest.get("model_version", "unknown"))
         policy_version = str(self.policy.get("policy_version", "unknown"))

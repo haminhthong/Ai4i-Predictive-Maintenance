@@ -304,3 +304,20 @@ def failure_capture_at_k(
     count = max(1, int(np.ceil(y_true.size * fraction)))
     top_indices = np.argsort(-y_prob, kind="stable")[:count]
     return float(y_true[top_indices].sum() / y_true.sum())
+
+
+def queue_precision_at_k(
+    labels: np.ndarray,
+    probabilities: np.ndarray,
+    fraction: float,
+) -> float:
+    """Tính precision của queue top-K theo tỷ lệ capacity được chọn."""
+    if not 0 < fraction <= 1:
+        raise ValueError("fraction phải nằm trong khoảng (0, 1].")
+    y_true = np.asarray(labels, dtype=int)
+    y_prob = np.asarray(probabilities, dtype=float)
+    if y_true.shape != y_prob.shape or y_true.size == 0:
+        return 0.0
+    count = max(1, int(np.ceil(y_true.size * fraction)))
+    top_indices = np.argsort(-y_prob, kind="stable")[:count]
+    return float(y_true[top_indices].mean())

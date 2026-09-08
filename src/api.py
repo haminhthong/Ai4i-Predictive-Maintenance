@@ -12,7 +12,7 @@ Service cung cấp:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
@@ -403,7 +403,12 @@ def record_maintenance_review(review: MaintenanceReviewRequest) -> dict[str, str
     service = RiskInferenceService.get_instance()
     try:
         payload = review.model_dump(exclude_none=True)
-        payload.setdefault("reviewed_at", datetime.now(UTC).isoformat().replace("+00:00", "Z"))
+        payload.setdefault(
+            "reviewed_at",
+            datetime.now(timezone.utc).isoformat().replace(  # noqa: UP017 - tương thích Python 3.10
+                "+00:00", "Z"
+            ),
+        )
         service.record_review(payload)
     except (OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(

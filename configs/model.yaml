@@ -6,9 +6,9 @@ model_development:
     split_manifest: "reports/split_manifest.json"
     audit_report: "reports/data_audit.json"
     fractions:
-      train: 0.64
-      validation: 0.16
-      test: 0.20
+      development: 0.70
+      policy_validation: 0.15
+      locked_test: 0.15
 
   feature_contract:
     version: "ai4i-canonical-v2"
@@ -26,12 +26,9 @@ model_development:
 
   model_zoo:
     candidates:
-      - logistic_baseline
-      - logistic_sigmoid_calibrated
-      - random_forest_baseline
-      - rf_sigmoid_calibrated
-      - hist_gb_baseline
-      - hist_gb_sigmoid_calibrated
+      - logistic_regression
+      - random_forest
+      - hist_gradient_boosting
 
   champion_selection:
     primary_metric: "pr_auc"

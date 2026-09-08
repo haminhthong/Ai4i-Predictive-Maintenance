@@ -201,7 +201,7 @@ def train_and_freeze_system() -> dict[str, Any]:
     decision_policy["selected_on"] = "policy_validation_only"
     decision_policy["queue_strategy"] = "latest_valid_event_per_asset_then_top_k"
 
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(datetime.timezone.utc)  # noqa: UP017 - tương thích Python 3.10
     model_version = f"ai4i-risk-v3.0.0-{now.strftime('%Y%m%d%H%M%S')}-{data_hash[:7]}"
     model_config = {
         "model_version": model_version,

@@ -34,7 +34,12 @@
     ],
     "failure_capture_at_1pct": 0.29411764705882354,
     "failure_capture_at_2pct": 0.5882352941176471,
-    "failure_capture_at_3pct": 0.8431372549019608
+    "failure_capture_at_3pct": 0.8431372549019608,
+    "queue_precision_at_1pct": 1.0,
+    "queue_precision_at_2pct": 1.0,
+    "queue_precision_at_3pct": 0.9555555555555556,
+    "review_coverage": 0.038,
+    "priority_override_rate": 0.8596491228070176
   },
   "threshold_ablation_study": {
     "fixed_0_50": {
