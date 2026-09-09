@@ -74,16 +74,10 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     # Chuẩn hóa giá trị cột quality_type nếu có
     if "quality_type" in clean_df.columns:
-        clean_df["quality_type"] = (
-            clean_df["quality_type"].astype(str).str.strip().str.upper()
-        )
-        invalid_types = sorted(
-            set(clean_df["quality_type"].dropna()) - set(VALID_QUALITY_TYPES)
-        )
+        clean_df["quality_type"] = clean_df["quality_type"].astype(str).str.strip().str.upper()
+        invalid_types = sorted(set(clean_df["quality_type"].dropna()) - set(VALID_QUALITY_TYPES))
         if invalid_types:
-            raise ValueError(
-                f"quality_type không hợp lệ: {invalid_types}; chỉ nhận L, M hoặc H."
-            )
+            raise ValueError(f"quality_type không hợp lệ: {invalid_types}; chỉ nhận L, M hoặc H.")
 
     return clean_df
 
@@ -121,9 +115,7 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     # 1. Thermal operating-state proxy (K)
-    data["temperature_delta_k"] = (
-        data["process_temperature_k"] - data["air_temperature_k"]
-    )
+    data["temperature_delta_k"] = data["process_temperature_k"] - data["air_temperature_k"]
 
     # 2. Công suất cơ học thực tế (Watts: P = tau * omega)
     angular_velocity = data["rotational_speed_rpm"] * (2.0 * np.pi / 60.0)
@@ -175,9 +167,7 @@ def build_canonical_features(
     # Khi có raw sensor, luôn tính lại engineered features để caller không thể
     # gửi giá trị dẫn xuất sai hoặc tạo train-serving skew.
     has_raw_sensor = all(col in clean_df.columns for col in RAW_SENSOR_FEATURES)
-    if has_raw_sensor or not all(
-        col in clean_df.columns for col in ENGINEERED_FEATURES
-    ):
+    if has_raw_sensor or not all(col in clean_df.columns for col in ENGINEERED_FEATURES):
         clean_df = add_engineered_features(clean_df)
 
     # Chỉ chọn và sắp xếp các cột theo đúng Feature Contract

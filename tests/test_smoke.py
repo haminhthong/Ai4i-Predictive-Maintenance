@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+
 from src.api import SensorPayload, app
 from src.contracts import (
     FAILURE_MODE_COLUMNS,
@@ -266,9 +267,7 @@ def test_engineered_features_formulas() -> None:
 
     # mechanical_power_w = 40 * (1500 * 2 * pi / 60) ≈ 6283.185 Watts
     expected_power = 40.0 * (1500.0 * 2.0 * math.pi / 60.0)
-    assert (
-        pytest.approx(res_df.loc[0, "mechanical_power_w"], rel=1e-3) == expected_power
-    )
+    assert pytest.approx(res_df.loc[0, "mechanical_power_w"], rel=1e-3) == expected_power
 
     # wear_load_interaction = 20 * 40 = 800.0 min*Nm
     assert res_df.loc[0, "wear_load_interaction"] == 800.0
@@ -285,9 +284,7 @@ def test_business_threshold_prefers_lower_total_cost() -> None:
     probabilities = np.array([0.9, 0.6, 0.4, 0.1])
     costs = BusinessCosts(false_negative=5.0, false_positive=1.0)
 
-    optimal_thresh, min_cost = find_threshold_minimizing_cost(
-        labels, probabilities, costs
-    )
+    optimal_thresh, min_cost = find_threshold_minimizing_cost(labels, probabilities, costs)
     assert optimal_thresh == 0.6
     assert min_cost == 0.0
 
@@ -315,10 +312,7 @@ def test_map_decision_action_prioritization() -> None:
         map_decision_action(0.50, alert_threshold=0.35, critical_threshold=0.75)
         == "REVIEW_REQUIRED"
     )
-    assert (
-        map_decision_action(0.20, alert_threshold=0.35, critical_threshold=0.75)
-        == "NO_ALERT"
-    )
+    assert map_decision_action(0.20, alert_threshold=0.35, critical_threshold=0.75) == "NO_ALERT"
     # Khi có warning phân bố nhưng xác suất thấp -> Vẫn kích hoạt REVIEW_REQUIRED
     assert (
         map_decision_action(

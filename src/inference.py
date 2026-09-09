@@ -74,29 +74,23 @@ class RiskInferenceService:
             "ready": False,
         }
         if not checks.get("hashes_match"):
-            self.artifact_checks["error"] = checks.get(
-                "error", "Hash release không khớp."
-            )
+            self.artifact_checks["error"] = checks.get("error", "Hash release không khớp.")
             return
 
         self.bundle_dir = bundle_dir
         self.manifest = checks["manifest"]
         self.model = joblib.load(bundle_dir / "model.joblib")
-        self.policy = json.loads(
-            (bundle_dir / "decision_policy.json").read_text(encoding="utf-8")
-        )
+        self.policy = json.loads((bundle_dir / "decision_policy.json").read_text(encoding="utf-8"))
         self.contract = json.loads(
             (bundle_dir / "feature_contract.json").read_text(encoding="utf-8")
         )
         self.reference_distribution = json.loads(
             (bundle_dir / "reference_distribution.json").read_text(encoding="utf-8")
         )
-        self.artifact_checks["feature_contract_exact"] = self.contract.get(
-            "features"
-        ) == list(MODEL_FEATURE_CONTRACT)
-        self.artifact_checks["reference_distribution_exists"] = bool(
-            self.reference_distribution
+        self.artifact_checks["feature_contract_exact"] = self.contract.get("features") == list(
+            MODEL_FEATURE_CONTRACT
         )
+        self.artifact_checks["reference_distribution_exists"] = bool(self.reference_distribution)
         self.artifact_checks["reference_distribution_complete"] = all(
             feature in self.reference_distribution
             and "p0_5" in self.reference_distribution[feature]
@@ -159,17 +153,14 @@ class RiskInferenceService:
         if not distribution_file.exists():
             distribution_file = MODELS_DIR / "feature_ranges.json"
         if distribution_file.exists():
-            self.reference_distribution = json.loads(
-                distribution_file.read_text(encoding="utf-8")
-            )
+            self.reference_distribution = json.loads(distribution_file.read_text(encoding="utf-8"))
 
         # Legacy artifact được phép chạy để migration, nhưng không được coi là ready.
         self.artifact_checks = {
             "bundle_exists": False,
             "hashes_match": False,
             "required_files": False,
-            "feature_contract_exact": self.contract.get("features")
-            == list(MODEL_FEATURE_CONTRACT),
+            "feature_contract_exact": self.contract.get("features") == list(MODEL_FEATURE_CONTRACT),
             "reference_distribution_exists": bool(self.reference_distribution),
             "reference_distribution_complete": all(
                 feature in self.reference_distribution
@@ -220,9 +211,7 @@ class RiskInferenceService:
         tool_wear = number("tool_wear_min", "Tool wear", default=0.0)
         torque = number("torque_nm", "Torque", default=0.0)
         speed = number("rotational_speed_rpm", "Rotational speed", default=1500.0)
-        process_temperature = number(
-            "process_temperature_k", "Process temperature", default=310.0
-        )
+        process_temperature = number("process_temperature_k", "Process temperature", default=310.0)
         air_temperature = number("air_temperature_k", "Air temperature", default=300.0)
 
         observed: list[str] = []
@@ -252,17 +241,13 @@ class RiskInferenceService:
             )
         return context
 
-    def predict(
-        self, raw_payload: dict[str, Any], persist_event: bool = True
-    ) -> dict[str, Any]:
+    def predict(self, raw_payload: dict[str, Any], persist_event: bool = True) -> dict[str, Any]:
         """Chấm điểm snapshot: contract -> features -> risk -> reliability -> triage."""
         if not self.is_loaded or self.model is None:
             raise RuntimeError("Mô hình chưa sẵn sàng hoạt động.")
 
         canonical_payload = canonicalize_raw_dataframe(pd.DataFrame([raw_payload]))
-        forbidden_columns = (
-            set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
-        )
+        forbidden_columns = set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
         leaked_columns = sorted(forbidden_columns & set(canonical_payload.columns))
         if leaked_columns:
             raise ValueError(
@@ -296,10 +281,8 @@ class RiskInferenceService:
         feature_context = self.extract_feature_context(features)
         event_id = str(raw_payload.get("event_id") or f"evt_{uuid.uuid4().hex[:12]}")
         asset_id = str(raw_payload.get("asset_id") or "UNKNOWN_ASSET")
-        event_time = normalize_event_time(
-            raw_payload.get("event_time")
-        ) or datetime.now(
-            timezone.utc,  # noqa: UP017 - tương thích Python 3.10
+        event_time = normalize_event_time(raw_payload.get("event_time")) or datetime.now(
+            timezone.utc,
         ).isoformat().replace("+00:00", "Z")
         model_version = str(self.manifest.get("model_version", "unknown"))
         policy_version = str(self.policy.get("policy_version", "unknown"))
@@ -326,9 +309,7 @@ class RiskInferenceService:
                 self.event_store.record_event(event, raw_payload)
             except Exception as exc:
                 LOGGER.exception("Không thể ghi risk event vào SQLite.")
-                raise RuntimeError(
-                    "Không thể lưu risk event; queue chưa được cập nhật."
-                ) from exc
+                raise RuntimeError("Không thể lưu risk event; queue chưa được cập nhật.") from exc
             self.risk_events.append(event)
 
         return {
@@ -384,15 +365,11 @@ class RiskInferenceService:
         costs = self.policy.get("cost_weights", {})
         return f"FN{float(costs.get('false_negative', 5.0)):.0f}_FP{float(costs.get('false_positive', 1.0)):.0f}"
 
-    def build_queue(
-        self, capacity: int, shift: str | None = None
-    ) -> list[dict[str, Any]]:
+    def build_queue(self, capacity: int, shift: str | None = None) -> list[dict[str, Any]]:
         """Xếp queue từ các risk event đã ghi nhận trong tiến trình hiện tại."""
         persisted_events = self.event_store.list_risk_events()
         if shift is not None:
-            persisted_events = [
-                event for event in persisted_events if event.get("shift") == shift
-            ]
+            persisted_events = [event for event in persisted_events if event.get("shift") == shift]
         return build_maintenance_queue(persisted_events, capacity=capacity)
 
     def record_review(self, review: dict[str, Any]) -> None:

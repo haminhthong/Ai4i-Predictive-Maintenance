@@ -267,6 +267,7 @@ Predictive-Maintenance-Ai4i/
 │   └── utils.py                   # Logging, seed và JSON utilities
 ├── tests/                         # Smoke, contract và integration tests
 ├── requirements.txt
+├── ruff.toml                     # Contract lint/style dùng chung local và CI
 ├── Dockerfile
 ├── Makefile
 └── README.md
@@ -283,7 +284,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install ruff
+python -m pip install ruff==0.9.7
 ```
 
 Linux/macOS:
@@ -293,7 +294,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pip install ruff
+python -m pip install ruff==0.9.7
 ```
 
 Yêu cầu Python 3.10 trở lên. Nếu `data/raw/ai4i2020.csv` chưa tồn tại, tải dữ liệu:
@@ -325,6 +326,7 @@ API mặc định ở `http://127.0.0.1:8000`; tài liệu OpenAPI ở `/docs`. 
 ```bash
 pytest -q
 python -m ruff check --no-cache src app.py tests scripts
+python -m ruff format --check --no-cache src app.py tests scripts
 ```
 
 Các test chính kiểm tra leakage boundary, alias schema, unavailable reliability, release hash, queue latest-per-asset, priority override và rejection của target/identifier trong direct inference.
@@ -338,7 +340,7 @@ flowchart TD
     CHECKOUT["Checkout source"] --> SETUP["Setup Python 3.10 / 3.11 / 3.12"]
     SETUP --> INSTALL["Install requirements + Ruff"]
     INSTALL --> DATA["Validate tracked AI4I dataset"]
-    DATA --> LINT["Ruff check"]
+    DATA --> LINT["Ruff check + format check"]
     LINT --> TEST["Pytest: contract + API + queue + release checks"]
     TEST --> PASS["CI passed"]
 ```

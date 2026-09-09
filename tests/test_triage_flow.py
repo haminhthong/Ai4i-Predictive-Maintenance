@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+
 from src.artifact import find_latest_release, verify_release_bundle
 from src.contracts import MODEL_FEATURE_CONTRACT, RUNTIME_METADATA_FIELDS
 from src.data import _is_valid_split_registry

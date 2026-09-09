@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from src.utils import LOGGER, setup_logging
 from ucimlrepo import fetch_ucirepo
+
+from src.utils import LOGGER, setup_logging
 
 
 def download_ai4i_dataset(output_dir: str | Path = "data/raw") -> Path:

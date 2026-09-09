@@ -33,9 +33,7 @@ DEFAULT_SPLIT_MANIFEST_PATH = Path("reports/split_manifest.json")
 DEFAULT_AUDIT_REPORT_PATH = Path("reports/data_audit.json")
 
 
-def _is_valid_split_registry(
-    registry: dict[str, Any], total_rows: int, seed: int
-) -> bool:
+def _is_valid_split_registry(registry: dict[str, Any], total_rows: int, seed: int) -> bool:
     """Kiểm tra split manifest đủ index, không chồng lấn và bao phủ toàn bộ dữ liệu."""
     expected_fractions = {
         "development": 0.70,
@@ -101,9 +99,7 @@ def audit_dataset(
 
     total_rows = len(clean_df)
     duplicate_rows = int(clean_df.duplicated().sum())
-    missing_counts = {
-        str(k): int(v) for k, v in clean_df.isnull().sum().items() if v > 0
-    }
+    missing_counts = {str(k): int(v) for k, v in clean_df.isnull().sum().items() if v > 0}
 
     # Đếm số lượng máy hỏng và tỷ lệ mắc (Prevalence)
     if TARGET_COLUMN in clean_df.columns:
@@ -279,21 +275,15 @@ def load_data(
     # 2. Tách metadata chế độ hỏng hóc (dành riêng cho error analysis)
     metadata_cols = [c for c in FAILURE_MODE_COLUMNS if c in clean_df.columns]
     modes_df = (
-        clean_df[metadata_cols].copy()
-        if metadata_cols
-        else pd.DataFrame(index=clean_df.index)
+        clean_df[metadata_cols].copy() if metadata_cols else pd.DataFrame(index=clean_df.index)
     )
 
     # 3. Xây dựng feature matrix theo đúng Shared Feature Contract
     # Loại bỏ hoàn toàn target, id, và failure modes khỏi features
-    features_df = build_canonical_features(
-        clean_df, expected_features=MODEL_FEATURE_CONTRACT
-    )
+    features_df = build_canonical_features(clean_df, expected_features=MODEL_FEATURE_CONTRACT)
 
     # 4. Nạp hoặc sinh Split Registry
-    registry = create_or_load_split_registry(
-        raw_df, seed=seed, manifest_path=manifest_path
-    )
+    registry = create_or_load_split_registry(raw_df, seed=seed, manifest_path=manifest_path)
 
     development_idx = registry["development_indices"]
     policy_idx = registry["policy_indices"]

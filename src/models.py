@@ -75,9 +75,7 @@ def get_candidate_models(seed: int = 42) -> dict[str, Any]:
 
     def make_log() -> Pipeline:
         return build_pipeline(
-            LogisticRegression(
-                max_iter=1000, class_weight="balanced", C=1.0, random_state=seed
-            )
+            LogisticRegression(max_iter=1000, class_weight="balanced", C=1.0, random_state=seed)
         )
 
     def make_rf() -> Pipeline:
@@ -116,9 +114,7 @@ def compute_calibration_curve_and_ece(
     curve_points: list[dict[str, float]] = []
 
     for i in range(n_bins):
-        upper_bound = (
-            y_prob <= bin_edges[i + 1] if i == n_bins - 1 else y_prob < bin_edges[i + 1]
-        )
+        upper_bound = y_prob <= bin_edges[i + 1] if i == n_bins - 1 else y_prob < bin_edges[i + 1]
         bin_mask = (y_prob >= bin_edges[i]) & upper_bound
         bin_size = int(np.sum(bin_mask))
         if bin_size > 0:

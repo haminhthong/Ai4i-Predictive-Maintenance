@@ -39,7 +39,8 @@ def get_git_sha() -> str:
     if git_executable is None:
         return "git_unavailable"
     try:
-        output = subprocess.check_output(  # noqa: S603 - executable được xác thực bằng shutil.which
+        # Executable lấy từ shutil.which và tham số git được cố định, không qua shell.
+        output = subprocess.check_output(
             [git_executable, "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
         )
         return output.decode("utf-8").strip()
@@ -76,9 +77,7 @@ def _choose_champion(leaderboard: dict[str, dict[str, float]]) -> str:
     """Chọn model từ OOF score, không dùng Policy Validation hoặc Locked Test."""
     best_pr_auc = max(item["pr_auc_oof"] for item in leaderboard.values())
     candidates = [
-        name
-        for name, item in leaderboard.items()
-        if item["pr_auc_oof"] >= best_pr_auc - 0.01
+        name for name, item in leaderboard.items() if item["pr_auc_oof"] >= best_pr_auc - 0.01
     ]
     # Random Forest là production candidate đã được chọn trước; chỉ nhường chỗ
     # nếu chênh lệch PR-AUC vượt tolerance 0.01.
@@ -183,22 +182,16 @@ def train_and_freeze_system() -> dict[str, Any]:
     split_registry = create_or_load_split_registry(raw_df, seed=SEED)
     LOGGER.info("Split: %s", split_registry["split_counts"])
 
-    X_development, X_policy, _, y_development, y_policy, _ = load_data(
-        path=raw_path, seed=SEED
-    )
+    X_development, X_policy, _, y_development, y_policy, _ = load_data(path=raw_path, seed=SEED)
     reference_distribution = extract_feature_ranges(X_development)
 
     candidates = get_candidate_models(seed=SEED)
-    leaderboard, _ = _cross_validate_candidates(
-        candidates, X_development, y_development
-    )
+    leaderboard, _ = _cross_validate_candidates(candidates, X_development, y_development)
     champion_name = _choose_champion(leaderboard)
     LOGGER.info("Champion được chọn từ Development CV: %s", champion_name)
 
     # Calibration là stage riêng, chỉ fit sau khi base model đã được chọn.
-    calibrated_model = calibrate_model(
-        get_candidate_models(seed=SEED)[champion_name], cv=3
-    )
+    calibrated_model = calibrate_model(get_candidate_models(seed=SEED)[champion_name], cv=3)
     calibrated_model.fit(X_development, y_development)
     policy_probabilities = calibrated_model.predict_proba(X_policy)[:, 1]
     costs = BusinessCosts(false_negative=5.0, false_positive=1.0)
@@ -208,7 +201,7 @@ def train_and_freeze_system() -> dict[str, Any]:
     decision_policy["selected_on"] = "policy_validation_only"
     decision_policy["queue_strategy"] = "latest_valid_event_per_asset_then_top_k"
 
-    now = datetime.datetime.now(datetime.timezone.utc)  # noqa: UP017 - tương thích Python 3.10
+    now = datetime.datetime.now(datetime.timezone.utc)
     model_version = f"ai4i-risk-v3.0.0-{now.strftime('%Y%m%d%H%M%S')}-{data_hash[:7]}"
     model_config = {
         "model_version": model_version,
@@ -284,9 +277,7 @@ def train_and_freeze_system() -> dict[str, Any]:
     try:
         save_json(Path("reports/validation_metrics.json"), validation_metrics)
     except PermissionError:
-        LOGGER.warning(
-            "Không ghi được báo cáo validation legacy; bản chuẩn nằm trong release."
-        )
+        LOGGER.warning("Không ghi được báo cáo validation legacy; bản chuẩn nằm trong release.")
     LOGGER.info("Đã tạo release bundle: %s", release_dir)
     return validation_metrics
 

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+
 from src.inference import RiskInferenceService
 
 # Thiết lập cấu hình trang Streamlit
@@ -142,9 +143,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
     failure_modes_data = {}
     if failure_modes_path.exists():
         with suppress(OSError, json.JSONDecodeError):
-            failure_modes_data = json.loads(
-                failure_modes_path.read_text(encoding="utf-8")
-            )
+            failure_modes_data = json.loads(failure_modes_path.read_text(encoding="utf-8"))
 
     # Sidebar: Nhập thông số cảm biến thời gian thực
     st.sidebar.header("🎛️ Thông số cảm biến thời gian thực")
@@ -201,15 +200,11 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
     # Headline KPI Metrics
     col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
-        model_name = (
-            service.manifest.get("model_type", "N/A") if service_ready else "N/A"
-        )
+        model_name = service.manifest.get("model_type", "N/A") if service_ready else "N/A"
         st.metric("Champion Model", model_name)
     with col2:
         perf = test_metrics.get("test_performance", test_metrics)
-        st.metric(
-            "PR-AUC (Locked Test)", f"{perf.get('pr_auc', 0.0):.4f}" if perf else "N/A"
-        )
+        st.metric("PR-AUC (Locked Test)", f"{perf.get('pr_auc', 0.0):.4f}" if perf else "N/A")
     with col3:
         st.metric(
             "Brier / ECE",
@@ -218,9 +213,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
             else "N/A",
         )
     with col4:
-        alert_thresh = (
-            service.policy.get("primary_alert_threshold", 0.5) if service_ready else 0.5
-        )
+        alert_thresh = service.policy.get("primary_alert_threshold", 0.5) if service_ready else 0.5
         st.metric("Alert Threshold (θ*)", f"{alert_thresh:.4f}")
     with col5:
         cost_1k = (
@@ -265,7 +258,9 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
             action_text = "🚨 PRIORITY REVIEW: ĐƯA VÀO HÀNG ĐỢI BẢO TRÌ ƯU TIÊN"
         elif action == "REVIEW_REQUIRED":
             box_class = "action-review"
-            action_text = "⚠️ REVIEW REQUIRED: RỦI RO VƯỢT NGƯỠNG - ĐƯA VÀO HÀNG ĐỢI KIỂM TRA ĐỊNH KỲ"
+            action_text = (
+                "⚠️ REVIEW REQUIRED: RỦI RO VƯỢT NGƯỠNG - ĐƯA VÀO HÀNG ĐỢI KIỂM TRA ĐỊNH KỲ"
+            )
         else:
             box_class = "action-noalert"
             action_text = "🟢 NO ALERT: CHƯA CẦN ĐƯA VÀO QUEUE THEO POLICY HIỆN TẠI"
@@ -309,9 +304,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
             st.progress(failure_risk)
 
             st.markdown("#### 🚨 Điều kiện Quan sát được (Observed Conditions):")
-            st.caption(
-                "Các điều kiện heuristic độc lập; đây không phải model attribution:"
-            )
+            st.caption("Các điều kiện heuristic độc lập; đây không phải model attribution:")
             if ops_block["observed_conditions"]:
                 for code in ops_block["observed_conditions"]:
                     st.warning(f"• **{code}**")
@@ -319,9 +312,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
                 st.success("• Không phát hiện điều kiện bất thường theo heuristic.")
 
             st.markdown("#### 🔍 Ngữ cảnh Đặc trưng Quan sát (Feature Context):")
-            st.caption(
-                "Các giá trị cảm biến và đặc trưng phái sinh tại thời điểm snapshot:"
-            )
+            st.caption("Các giá trị cảm biến và đặc trưng phái sinh tại thời điểm snapshot:")
             df_ctx = pd.DataFrame(ops_block["feature_context"])
             st.dataframe(df_ctx, use_container_width=True)
 
@@ -371,9 +362,7 @@ Operational Reason Codes + Feature Context -> 4-Block API Response
                 st.table(pd.DataFrame(rows))
 
             if failure_modes_data:
-                st.markdown(
-                    "#### ⚙️ Phân tích Lát cắt Chế độ Hỏng hóc (Failure-Mode Recall):"
-                )
+                st.markdown("#### ⚙️ Phân tích Lát cắt Chế độ Hỏng hóc (Failure-Mode Recall):")
                 mode_rows = []
                 for m_col, m_info in failure_modes_data.items():
                     mode_rows.append(

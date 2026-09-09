@@ -64,9 +64,7 @@ class SQLiteRiskEventStore:
             )
             columns = {
                 row["name"]
-                for row in connection.execute(
-                    "PRAGMA table_info(sensor_events)"
-                ).fetchall()
+                for row in connection.execute("PRAGMA table_info(sensor_events)").fetchall()
             }
             if "shift" not in columns:
                 connection.execute("ALTER TABLE sensor_events ADD COLUMN shift TEXT")
@@ -115,9 +113,7 @@ class SQLiteRiskEventStore:
                     event["reliability_status"],
                     event["action"],
                     int(event["queue_eligible"]),
-                    json.dumps(
-                        event.get("observed_conditions", []), ensure_ascii=False
-                    ),
+                    json.dumps(event.get("observed_conditions", []), ensure_ascii=False),
                 ),
             )
 

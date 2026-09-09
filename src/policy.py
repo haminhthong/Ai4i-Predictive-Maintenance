@@ -55,9 +55,7 @@ def find_threshold_minimizing_cost(
     y_prob = np.asarray(probabilities, dtype=float)
 
     if y_true.shape != y_prob.shape or y_true.size == 0:
-        raise ValueError(
-            "Danh sách nhãn và xác suất phải cùng kích thước và không được rỗng."
-        )
+        raise ValueError("Danh sách nhãn và xác suất phải cùng kích thước và không được rỗng.")
 
     candidate_thresholds = np.unique(np.r_[0.0, y_prob, 1.0])
 
@@ -107,8 +105,7 @@ def find_threshold_maximizing_f1(
 
     candidate_thresholds = np.unique(np.r_[0.0, y_prob, 1.0])
     f1_scores = [
-        f1_score(y_true, (y_prob >= t).astype(int), zero_division=0)
-        for t in candidate_thresholds
+        f1_score(y_true, (y_prob >= t).astype(int), zero_division=0) for t in candidate_thresholds
     ]
     best_idx = int(np.argmax(f1_scores))
     return float(candidate_thresholds[best_idx]), float(f1_scores[best_idx])
@@ -171,20 +168,12 @@ def tune_all_validation_policies(
     fixed_thresh = 0.50
 
     # 4. Ràng buộc công suất bảo trì (Capacity Constraints): 5%, 3%, 2%
-    cap_5_thresh, _ = find_threshold_minimizing_cost(
-        y_val, probs_val, costs, max_alert_rate=0.05
-    )
-    cap_3_thresh, _ = find_threshold_minimizing_cost(
-        y_val, probs_val, costs, max_alert_rate=0.03
-    )
-    cap_2_thresh, _ = find_threshold_minimizing_cost(
-        y_val, probs_val, costs, max_alert_rate=0.02
-    )
+    cap_5_thresh, _ = find_threshold_minimizing_cost(y_val, probs_val, costs, max_alert_rate=0.05)
+    cap_3_thresh, _ = find_threshold_minimizing_cost(y_val, probs_val, costs, max_alert_rate=0.03)
+    cap_2_thresh, _ = find_threshold_minimizing_cost(y_val, probs_val, costs, max_alert_rate=0.02)
 
     # 5. Ngưỡng khẩn cấp (Critical Escalation Threshold)
-    critical_thresh = find_critical_threshold(
-        y_val, probs_val, alert_threshold=cost_thresh
-    )
+    critical_thresh = find_critical_threshold(y_val, probs_val, alert_threshold=cost_thresh)
 
     return {
         "policy_version": "maintenance-policy-v2",
@@ -254,7 +243,7 @@ def build_maintenance_queue(
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if parsed.tzinfo is None or parsed.utcoffset() is None:
             raise ValueError("event_time phải có timezone.")
-        return parsed.astimezone(timezone.utc)  # noqa: UP017 - tương thích Python 3.10
+        return parsed.astimezone(timezone.utc)
 
     for raw_event in risk_events:
         event = dict(raw_event)
