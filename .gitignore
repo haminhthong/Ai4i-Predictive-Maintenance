@@ -1,144 +1,31 @@
-# ============================================================================
-# Byte-compiled / optimized / DLL files
-# ============================================================================
+# Python cache và môi trường cục bộ
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-
-# ============================================================================
-# Distribution / packaging
-# ============================================================================
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# PyInstaller
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# ============================================================================
-# Unit test / coverage reports
-# ============================================================================
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
-
-# Translations
-*.mo
-*.pot
-
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
-# Flask stuff:
-instance/
-.webassets-cache
-
-# Scrapy stuff:
-.scrapy
-
-# Sphinx documentation
-docs/_build/
-
-# PyBuilder
-.pybuilder/
-target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# IPython
-profile_default/
-ipython_config.py
-
-# Environments
+.venv/
+venv/
+env/
 .env
 .env.local
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
 
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
+# Cache, coverage và artifact tạm của công cụ kiểm thử
+.pytest_cache/
+.ruff_cache/
 .mypy_cache/
-.dmypy.json
-dmypy.json
+.coverage*
+htmlcov/
 
-# pyre type checker
-.pyre/
+# File runtime không thuộc source hoặc release bundle
+data/runtime/
+*.sqlite3
 
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
+# File build/package và cấu hình IDE
+build/
+dist/
+*.egg-info/
 .idea/
-
-# VSCode
 .vscode/
 
-# Ruff stuff:
-.ruff_cache/
-
-# PyPI configuration file
-.pypirc
-
-# ============================================================================
-# Cursor IDE
-# ============================================================================
-.cursorignore
-.cursorindexingignore
-
-# ============================================================================
-# Project-specific: Model artifacts (binary, lớn, không commit)
-# ============================================================================
+# Model nhị phân sinh trong quá trình train; release JSON vẫn được commit
 models/*.joblib
 models/*.pkl
 models/*.bin
@@ -146,19 +33,6 @@ artifacts/**/*.joblib
 artifacts/**/*.pkl
 artifacts/**/*.bin
 
-# ============================================================================
-# Project-specific: Dữ liệu thô (tải qua script)
-# ============================================================================
+# Dataset tải về; bản CSV hiện tại vẫn được giữ trong Git vì đã track
 data/raw/*.csv
 data/raw/*.parquet
-
-# ============================================================================
-# Project-specific: Cho phép commit các báo cáo và metadata JSON
-# ============================================================================
-!reports/*.json
-!artifacts/champion/*.json
-
-# Dữ liệu runtime sinh ra khi API ghi risk event
-data/runtime/
-*.sqlite3
-
