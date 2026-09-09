@@ -42,7 +42,7 @@ RUN python -m pip install --upgrade pip \
         "fastapi>=0.95.0" \
         "uvicorn[standard]>=0.20.0" \
         "pydantic>=2.0.0" \
-        "scikit-learn>=1.2.0" \
+        "scikit-learn==1.7.1" \
         "pandas>=2.0.0" \
         "numpy>=1.24.0" \
         "joblib>=1.2.0"

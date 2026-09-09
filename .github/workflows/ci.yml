@@ -38,8 +38,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt ruff
 
-      - name: Download AI4I dataset
-        run: python -m scripts.download_data
+      - name: Verify model runtime version
+        run: python -c "import sklearn; assert sklearn.__version__ == '1.7.1', sklearn.__version__; print(sklearn.__version__)"
+
+      - name: Validate tracked AI4I dataset
+        run: |
+          python -c "from pathlib import Path; p=Path('data/raw/ai4i2020.csv'); assert p.is_file() and p.stat().st_size > 0, p; print(f'{p}: {p.stat().st_size} bytes')"
 
       - name: Lint
         run: python -m ruff check --no-cache src app.py tests scripts

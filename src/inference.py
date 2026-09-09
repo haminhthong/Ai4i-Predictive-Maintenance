@@ -245,7 +245,7 @@ class RiskInferenceService:
                 {
                     "feature": column,
                     "value": round(float(value), 2)
-                    if isinstance(value, (int, float, np.number))
+                    if isinstance(value, int | float | np.number)
                     else str(value),
                     "type": "observed_feature",
                 }

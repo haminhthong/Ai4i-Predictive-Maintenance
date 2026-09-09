@@ -23,19 +23,19 @@ Các số liệu dưới đây được đọc từ release Random Forest mới 
 
 | Metric | Result |
 |---|---:|
-| PR-AUC | 0.9302 |
-| ROC-AUC | 0.9794 |
-| Brier | 0.0055 |
-| ECE | 0.0080 |
-| Precision | 0.807 |
-| Recall | 0.902 |
+| PR-AUC | 0.9266 |
+| ROC-AUC | 0.9865 |
+| Brier | 0.0051 |
+| ECE | 0.0062 |
+| Precision | 0.918 |
+| Recall | 0.882 |
 
 ### Critical slices
 
 | Failure Mode | Recall | Detected / Total |
 |---|---:|---:|
 | TWF | 20% | 1 / 5 |
-| HDF | 100% | 21 / 21 |
+| HDF | 95.24% | 20 / 21 |
 | PWF | 100% | 11 / 11 |
 | OSF | 100% | 15 / 15 |
 | RNF | 0% | 0 / 1 |
@@ -48,12 +48,12 @@ Các slice này được đặt ngay cạnh headline metric để không cherry-
 |---|---:|---|
 | Failure Capture@1% | 29.41% | Tỷ lệ failure nằm trong 1% snapshot có risk cao nhất |
 | Failure Capture@2% | 58.82% | Tỷ lệ failure nằm trong 2% snapshot có risk cao nhất |
-| Failure Capture@3% | 84.31% | Tỷ lệ failure nằm trong 3% snapshot có risk cao nhất |
+| Failure Capture@3% | 86.27% | Tỷ lệ failure nằm trong 3% snapshot có risk cao nhất |
 | Queue Precision@1% | 100.00% | Tỷ lệ failure trong queue top 1% |
 | Queue Precision@2% | 100.00% | Tỷ lệ failure trong queue top 2% |
-| Queue Precision@3% | 95.56% | Tỷ lệ failure trong queue top 3% |
-| Review Coverage | 3.80% | Tỷ lệ snapshot vượt ngưỡng review chính |
-| Priority Override Rate | 85.96% | Tỷ lệ event review đạt ngưỡng priority trong nhóm review |
+| Queue Precision@3% | 97.78% | Tỷ lệ failure trong queue top 3% |
+| Review Coverage | 3.27% | Tỷ lệ snapshot vượt ngưỡng review chính |
+| Priority Override Rate | 97.96% | Tỷ lệ event review đạt ngưỡng priority trong nhóm review |
 
 Các metric trên được tính bằng `src/policy.py` và ghi vào `test_performance` bởi `src/evaluate.py`. Đây là benchmark trên Locked Test, không phải cam kết công suất cho một nhà máy khác.
 
@@ -162,6 +162,8 @@ Thứ tự feature là một phần của contract và được kiểm tra khi r
 - **Capacity:** policy lưu các kịch bản 5%, 3% và 2%; queue runtime vẫn áp dụng `capacity` thực tế từ request.
 - **Monitoring:** PSI/guardrail chỉ tạo tín hiệu điều tra; không tự động retrain vì drift có thể đến từ regime, vật liệu, cảm biến hoặc maintenance event.
 
+`scikit-learn` được pin ở `1.7.1` vì release chứa pickle của estimator được train bằng phiên bản này; không dùng dependency mở `>=` cho thư viện ML lõi để tránh lệch model khi CI/CD hoặc runtime load artifact.
+
 `releases/<model_version>/` là nguồn artifact runtime chuẩn. `artifacts/champion/` và `models/` chỉ là mirror chuyển tiếp cho client cũ.
 
 ## API và dữ liệu runtime
@@ -233,6 +235,7 @@ Báo cáo quan trọng:
 ```text
 Predictive-Maintenance-Ai4i/
 ├── .github/workflows/ci.yml       # CI: Python matrix + Ruff + pytest
+├── .github/workflows/cd.yml       # CD: build, smoke test và publish GHCR theo tag
 ├── app.py                         # Streamlit dashboard
 ├── configs/
 │   ├── model.yaml                 # Cấu hình tham chiếu model/split
@@ -334,13 +337,31 @@ Workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) chạy trên Pyt
 flowchart TD
     CHECKOUT["Checkout source"] --> SETUP["Setup Python 3.10 / 3.11 / 3.12"]
     SETUP --> INSTALL["Install requirements + Ruff"]
-    INSTALL --> DOWNLOAD["Download AI4I dataset"]
-    DOWNLOAD --> LINT["Ruff check"]
+    INSTALL --> DATA["Validate tracked AI4I dataset"]
+    DATA --> LINT["Ruff check"]
     LINT --> TEST["Pytest: contract + API + queue + release checks"]
     TEST --> PASS["CI passed"]
 ```
 
 CI không huấn luyện lại model và không sửa release artifact; nó kiểm tra code mới trên dataset và release đã được commit.
+
+### CD pipeline
+
+Workflow [`.github/workflows/cd.yml`](.github/workflows/cd.yml) chạy theo hai cách:
+
+- `workflow_dispatch`: build Docker image và smoke test `/health/live` + `/health/ready`, không publish.
+- Push tag theo mẫu `v*.*.*`: build image runtime, smoke test liveness/readiness, sau đó publish hai tag lên GitHub Container Registry: tag phiên bản và `latest`.
+
+```mermaid
+flowchart TD
+    TAG["Tag vX.Y.Z hoặc chạy thủ công"] --> BUILD["Docker Buildx: builder train -> runtime image"]
+    BUILD --> HEALTH["Smoke test /health/live + /health/ready"]
+    HEALTH -->|workflow_dispatch| DONE["Hoàn tất kiểm tra"]
+    HEALTH -->|tag vX.Y.Z| LOGIN["Login GHCR bằng GITHUB_TOKEN"]
+    LOGIN --> PUSH["Publish version tag + latest"]
+```
+
+Image mặc định được publish tại `ghcr.io/<github-owner>/ai4i-predictive-maintenance`. CD không publish từ pull request hoặc push branch thông thường.
 
 ### 5. Chạy bằng Makefile
 

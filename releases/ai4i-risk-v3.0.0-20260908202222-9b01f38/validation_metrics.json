@@ -1,0 +1,39 @@
+{
+  "protocol": "70_percent_development_5_fold_stratified_cv_15_percent_policy_validation",
+  "champion_model": "random_forest",
+  "cv_leaderboard": {
+    "logistic_regression": {
+      "pr_auc_oof": 0.47402147612144946,
+      "brier_oof": 0.10620685291818217
+    },
+    "random_forest": {
+      "pr_auc_oof": 0.8858174843252065,
+      "brier_oof": 0.009399957142857143
+    },
+    "hist_gradient_boosting": {
+      "pr_auc_oof": 0.8682750447492784,
+      "brier_oof": 0.009969685078709241
+    }
+  },
+  "policy_validation": {
+    "policy_version": "maintenance-policy-v2",
+    "selected_on": "policy_validation_only",
+    "cost_weights": {
+      "false_negative": 5.0,
+      "false_positive": 1.0,
+      "unit": "relative_cost_units"
+    },
+    "primary_alert_threshold": 0.418478147026077,
+    "critical_threshold": 0.43885708261009,
+    "frozen_thresholds": {
+      "fixed_0_50": 0.5,
+      "max_f1_validation": 0.5894524145866132,
+      "cost_sensitive_validation": 0.418478147026077,
+      "capacity_constrained_5pct": 0.418478147026077,
+      "capacity_constrained_3pct": 0.418478147026077,
+      "capacity_constrained_2pct": 0.8633282386296351
+    },
+    "validation_expected_cost": 58.0,
+    "queue_strategy": "latest_valid_event_per_asset_then_top_k"
+  }
+}

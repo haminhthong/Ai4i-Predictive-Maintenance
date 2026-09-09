@@ -10,10 +10,10 @@
   "failure_hdf": {
     "description": "Heat Dissipation Failure (Hỏng do giải nhiệt kém)",
     "total_test_failures": 21,
-    "detected_by_policy": 21,
-    "missed_by_policy": 0,
-    "detection_recall": 1.0,
-    "detection_percentage": "100.00%"
+    "detected_by_policy": 20,
+    "missed_by_policy": 1,
+    "detection_recall": 0.9523809523809523,
+    "detection_percentage": "95.24%"
   },
   "failure_pwf": {
     "description": "Power Failure (Hỏng do công suất bất thường)",
