@@ -99,7 +99,7 @@ def health() -> dict[str, Any]:
 
 @app.post("/score", response_model=ScoreResponse, tags=["Prediction"])
 def score(payload: SensorPayload) -> dict[str, Any]:
-    """Sensor snapshot -> calibrated failure risk -> review decision."""
+    """Snapshot cảm biến -> risk đã hiệu chỉnh -> quyết định review."""
     service = _service_or_503()
     try:
         return service.predict(payload.model_dump(exclude_none=True))

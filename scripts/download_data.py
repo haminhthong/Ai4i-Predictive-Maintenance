@@ -24,13 +24,13 @@ def download_ai4i_dataset(output_dir: str | Path = "data/raw") -> Path:
         "Bắt đầu tải bộ dữ liệu AI4I 2020 Predictive Maintenance Dataset (ID=601) từ UCI ML Repository..."
     )
 
-    # Fetch dữ liệu từ UCI ML Repo (ID: 601)
+    # Tải dữ liệu từ kho UCI ML Repo (mã bộ dữ liệu: 601).
     dataset = fetch_ucirepo(id=601)
 
     X = dataset.data.features.copy()
     y = dataset.data.targets.copy()
 
-    # Thêm các cột target vào chung 1 Dataframe
+    # Gộp các cột nhãn mục tiêu vào cùng một DataFrame.
     full_df = pd.concat([X, y], axis=1)
 
     target_path = Path(output_dir)

@@ -84,7 +84,7 @@
   },
   "failure_mode_analysis": {
     "failure_twf": {
-      "description": "Tool Wear Failure (Hỏng do mòn dụng cụ)",
+      "description": "Hỏng do mòn dụng cụ",
       "total_test_failures": 5,
       "detected": 1,
       "missed": 4,
@@ -92,7 +92,7 @@
       "recall_percent": "20.00%"
     },
     "failure_hdf": {
-      "description": "Heat Dissipation Failure (Hỏng do giải nhiệt kém)",
+      "description": "Hỏng do tản nhiệt kém",
       "total_test_failures": 21,
       "detected": 20,
       "missed": 1,
@@ -100,7 +100,7 @@
       "recall_percent": "95.24%"
     },
     "failure_pwf": {
-      "description": "Power Failure (Hỏng do công suất bất thường)",
+      "description": "Hỏng do công suất bất thường",
       "total_test_failures": 11,
       "detected": 11,
       "missed": 0,
@@ -108,7 +108,7 @@
       "recall_percent": "100.00%"
     },
     "failure_osf": {
-      "description": "Overstrain Failure (Hỏng do quá tải lực căng/mô-men)",
+      "description": "Hỏng do quá tải lực căng hoặc mô-men",
       "total_test_failures": 15,
       "detected": 14,
       "missed": 1,
@@ -116,7 +116,7 @@
       "recall_percent": "93.33%"
     },
     "failure_rnf": {
-      "description": "Random Failure (Hỏng hóc ngẫu nhiên)",
+      "description": "Hỏng hóc ngẫu nhiên",
       "total_test_failures": 1,
       "detected": 0,
       "missed": 1,

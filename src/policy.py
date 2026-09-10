@@ -21,7 +21,7 @@ def find_threshold_maximizing_f1(
     thresholds = np.unique(np.r_[0.0, y_prob, 1.0])
     scores = [f1_score(y_true, y_prob >= threshold, zero_division=0) for threshold in thresholds]
     best_score = max(scores)
-    # Khi F1 hòa, chọn threshold cao hơn để giảm số snapshot bị đưa đi review.
+    # Khi F1 hòa, chọn ngưỡng cao hơn để giảm số bản ghi bị đưa đi kiểm tra.
     best_threshold = max(
         threshold
         for threshold, score in zip(thresholds, scores, strict=True)

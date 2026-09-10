@@ -1,4 +1,4 @@
-"""Các hàm tiện ích hệ thống: Cấu hình logging, thiết lập random seed cố định và xử lý tệp JSON."""
+"""Tiện ích ghi log, cố định seed ngẫu nhiên và ghi tệp JSON."""
 
 from __future__ import annotations
 
@@ -6,33 +6,17 @@ import json
 import logging
 import os
 import random
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# Khởi tạo logger hệ thống
+import numpy as np
+
+# Bộ ghi log dùng chung cho các module ghi báo cáo và trạng thái pipeline.
 LOGGER = logging.getLogger("ai_predictive_maintenance")
 
 
-def normalize_event_time(value: str | None) -> str | None:
-    """Chuẩn hóa thời gian có timezone về ISO-8601 UTC dạng hậu tố `Z`."""
-    if value is None:
-        return None
-
-    text = str(value).strip()
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError("event_time phải là chuỗi ISO-8601 hợp lệ.") from exc
-
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError("event_time phải kèm timezone, ví dụ `2026-09-07T10:15:00Z`.")
-
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def setup_logging() -> None:
-    """Cấu hình định dạng và mức độ ghi log (logging) cho toàn bộ ứng dụng.
+    """Cấu hình định dạng và mức độ ghi log cho toàn bộ ứng dụng.
 
     Mức log mặc định là INFO, có thể thay đổi qua biến môi trường LOG_LEVEL.
     """
@@ -45,31 +29,14 @@ def setup_logging() -> None:
 
 
 def set_seed(seed: int = 42) -> None:
-    """Cố định giá trị sinh số ngẫu nhiên (random seed) để đảm bảo tính tái lập (reproducibility).
+    """Cố định bộ sinh số ngẫu nhiên để kết quả có thể tái lập.
 
     Args:
         seed (int): Giá trị seed ngẫu nhiên. Mặc định là 42.
     """
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
-    try:
-        import numpy as np
-
-        np.random.seed(seed)
-    except ImportError:
-        pass
-
-    try:
-        import torch
-
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-    except ImportError:
-        # Nếu dự án không dùng PyTorch, ghi log debug và bỏ qua
-        LOGGER.debug("Không tìm thấy PyTorch; đã đặt seed cho Python random và NumPy.")
+    np.random.seed(seed)
 
 
 def save_json(path: str | Path, payload: dict[str, Any]) -> None:
@@ -80,7 +47,7 @@ def save_json(path: str | Path, payload: dict[str, Any]) -> None:
         payload (dict[str, Any]): Dữ liệu dictionary cần ghi vào tệp.
     """
     file_path = Path(path)
-    # Tự động tạo các thư mục cha nếu chưa tồn tại
+    # Tạo các thư mục cha trước khi ghi nếu chúng chưa tồn tại.
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),

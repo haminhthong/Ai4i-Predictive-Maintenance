@@ -25,7 +25,7 @@ ARTIFACTS_DIR = Path("artifacts")
 
 
 class RiskInferenceService:
-    """Nạp một artifact duy nhất và chấm điểm failure risk hiện tại."""
+    """Nạp một artifact duy nhất và chấm điểm risk hỏng hóc hiện tại."""
 
     _instance: RiskInferenceService | None = None
 
@@ -126,7 +126,7 @@ class RiskInferenceService:
     def rank(
         self, raw_payloads: list[dict[str, Any]], top_k: int | None = None
     ) -> list[dict[str, Any]]:
-        """Score toàn bộ batch rồi sắp xếp giảm dần theo calibrated risk."""
+        """Chấm điểm toàn bộ batch rồi sắp xếp giảm dần theo risk đã hiệu chỉnh."""
         scored = []
         for index, payload in enumerate(raw_payloads):
             row = dict(payload)

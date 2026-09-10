@@ -1,10 +1,9 @@
-"""Module tính toán và quản lý đặc trưng dùng chung (Shared Feature Engineering).
+"""Tính toán và quản lý đặc trưng dùng chung.
 
 ĐẢM BẢO NGUYÊN TẮC:
-1. Duy nhất một nơi cài đặt logic biến đổi đặc trưng cho cả Huấn luyện (Train),
-   Đánh giá (Evaluate) và Phục vụ trực tuyến (Serving/API).
-2. Triệt tiêu hoàn toàn rủi ro Train-Serving Skew.
-3. Không thực hiện fuzzy/prefix matching ngầm - sử dụng đúng lược đồ Canonical.
+1. Chỉ có một nơi cài đặt logic biến đổi cho huấn luyện, đánh giá và phục vụ API.
+2. Dùng cùng một hợp đồng đặc trưng để tránh lệch giữa huấn luyện và phục vụ.
+3. Không tự động đối chiếu mơ hồ theo tiền tố; chỉ dùng lược đồ chuẩn đã khai báo.
 """
 
 from __future__ import annotations
@@ -34,14 +33,14 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     clean_df = df.copy()
 
-    # Tạo bản đồ ánh xạ dựa trên tên cột hiện có
+    # Tạo bảng ánh xạ từ các tên cột thực tế trong DataFrame.
     rename_mapping: dict[str, str] = {}
     for col in clean_df.columns:
         col_clean = col.strip()
         if col_clean in RAW_TO_CANONICAL_COLUMN_MAP:
             rename_mapping[col] = RAW_TO_CANONICAL_COLUMN_MAP[col_clean]
         else:
-            # Tìm kiếm trường hợp không phân biệt hoa/thường nếu không khớp trực tiếp
+            # Thử đối chiếu không phân biệt hoa thường nếu chưa khớp trực tiếp.
             lower_matched = next(
                 (
                     v
@@ -55,8 +54,8 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     clean_df = clean_df.rename(columns=rename_mapping)
 
-    # Chặn tình huống một payload gửi đồng thời nhiều alias của cùng một trường.
-    # Chọn giá trị đầu tiên khác null để tránh tạo hai cột cùng tên sau rename.
+    # Xử lý trường hợp dữ liệu đầu vào có nhiều bí danh cho cùng một trường.
+    # Chọn giá trị khác rỗng đầu tiên, đồng thời báo lỗi nếu các giá trị xung đột.
     if clean_df.columns.duplicated().any():
         merged = pd.DataFrame(index=clean_df.index)
         for column in dict.fromkeys(clean_df.columns):
@@ -72,7 +71,7 @@ def canonicalize_raw_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             merged[column] = duplicate_values.bfill(axis=1).iloc[:, 0]
         clean_df = merged
 
-    # Chuẩn hóa giá trị cột quality_type nếu có
+    # Chuẩn hóa giá trị loại chất lượng sản phẩm nếu cột này tồn tại.
     if "quality_type" in clean_df.columns:
         clean_df["quality_type"] = clean_df["quality_type"].astype(str).str.strip().str.upper()
         invalid_types = sorted(set(clean_df["quality_type"].dropna()) - set(VALID_QUALITY_TYPES))
@@ -87,11 +86,11 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
 
     Các đặc trưng được tính toán:
     1. `temperature_delta_k`: Chênh lệch nhiệt độ giữa quá trình gia công và nhiệt độ không khí (K).
-       - Ý nghĩa: Thermal operating-state proxy phản ánh sự tích nhiệt trong buồng máy.
+       - Ý nghĩa: chỉ dấu trạng thái nhiệt khi vận hành.
     2. `mechanical_power_w`: Công suất cơ học thực tế của trục quay (Watts).
-       - Công thức chuẩn: P = Tau (Nm) * Omega (rad/s) với Omega = RPM * (2 * pi / 60).
+       - Công thức: P = mô-men xoắn (Nm) * tốc độ góc (rad/s), với tốc độ góc = RPM * (2 * pi / 60).
     3. `wear_load_interaction`: Tương tác giữa độ mòn dụng cụ và tải trọng mô-men xoắn (min * Nm).
-       - Ý nghĩa: Engineering interaction proxy phản ánh áp lực tích lũy khi dao đã mòn.
+       - Ý nghĩa: chỉ dấu tương tác kỹ thuật giữa độ mòn và tải trọng.
 
     Args:
         df: DataFrame chứa tối thiểu các cột cảm biến thô canonical.
@@ -114,14 +113,14 @@ def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
             f"Thiếu các cột cảm biến bắt buộc để tính toán engineered features: {missing_cols}"
         )
 
-    # 1. Thermal operating-state proxy (K)
+    # 1. Chỉ dấu trạng thái nhiệt khi vận hành (K).
     data["temperature_delta_k"] = data["process_temperature_k"] - data["air_temperature_k"]
 
-    # 2. Công suất cơ học thực tế (Watts: P = tau * omega)
+    # 2. Công suất cơ học (W): P = mô-men xoắn * tốc độ góc.
     angular_velocity = data["rotational_speed_rpm"] * (2.0 * np.pi / 60.0)
     data["mechanical_power_w"] = data["torque_nm"] * angular_velocity
 
-    # 3. Engineering interaction proxy (min * Nm)
+    # 3. Chỉ dấu tương tác giữa độ mòn và tải trọng (phút * Nm).
     data["wear_load_interaction"] = data["tool_wear_min"] * data["torque_nm"]
 
     return data
@@ -164,13 +163,13 @@ def build_canonical_features(
     """
     clean_df = canonicalize_raw_dataframe(df)
 
-    # Khi có raw sensor, luôn tính lại engineered features để caller không thể
-    # gửi giá trị dẫn xuất sai hoặc tạo train-serving skew.
+    # Khi có đủ biến thô, luôn tính lại đặc trưng dẫn xuất để tránh lệch giữa
+    # lúc huấn luyện và lúc phục vụ, hoặc nhận giá trị dẫn xuất do bên gọi tự gửi.
     has_raw_sensor = all(col in clean_df.columns for col in RAW_SENSOR_FEATURES)
     if has_raw_sensor or not all(col in clean_df.columns for col in ENGINEERED_FEATURES):
         clean_df = add_engineered_features(clean_df)
 
-    # Chỉ chọn và sắp xếp các cột theo đúng Feature Contract
+    # Chỉ chọn và sắp xếp cột theo đúng hợp đồng đặc trưng.
     missing = [c for c in expected_features if c not in clean_df.columns]
     if missing:
         raise KeyError(f"Không thể xây dựng feature dataframe do thiếu: {missing}")
