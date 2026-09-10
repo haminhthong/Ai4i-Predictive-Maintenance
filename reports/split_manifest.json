@@ -1,15 +1,13 @@
 {
   "seed": 42,
-  "stratification_target": "machine_failure",
-  "total_samples": 10000,
   "split_fractions": {
     "development": 0.7,
-    "policy_validation": 0.15,
-    "locked_test": 0.15
+    "validation": 0.15,
+    "test": 0.15
   },
   "split_counts": {
     "development": 7000,
-    "policy_validation": 1500,
+    "validation": 1500,
     "test": 1500
   },
   "development_indices": [
@@ -7014,7 +7012,7 @@
     7234,
     5137
   ],
-  "policy_indices": [
+  "validation_indices": [
     9447,
     6782,
     3929,

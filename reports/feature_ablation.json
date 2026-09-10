@@ -1,0 +1,20 @@
+{
+  "model": "random_forest",
+  "raw_6": {
+    "pr_auc_mean": 0.7316577958097137,
+    "pr_auc_std": 0.07989656195405936,
+    "brier_mean": 0.017092257142857142,
+    "brier_std": 0.0015435053917585632
+  },
+  "raw_plus_engineered_9": {
+    "pr_auc_mean": 0.8852152737530435,
+    "pr_auc_std": 0.04140326513606017,
+    "brier_mean": 0.009399957142857141,
+    "brier_std": 0.0015322165030585253
+  },
+  "engineered_features": [
+    "temperature_delta_k",
+    "mechanical_power_w",
+    "wear_load_interaction"
+  ]
+}

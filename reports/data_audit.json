@@ -1,35 +1,34 @@
 {
-  "dataset_name": "AI4I 2020 Predictive Maintenance Dataset",
-  "total_observations": 10000,
+  "dataset": "AI4I 2020",
+  "observation_unit": "operating snapshot",
+  "temporal_ordering": "unavailable",
+  "rows": 10000,
   "duplicate_rows": 0,
-  "missing_values_count": {},
-  "has_missing_values": false,
+  "missing_values": {},
   "raw_sha256": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
-  "target_column": "machine_failure",
-  "target_summary": {
-    "failure_samples": 339,
-    "normal_samples": 9661,
-    "prevalence_rate": 0.0339,
-    "prevalence_percentage": "3.39%"
+  "target": {
+    "column": "machine_failure",
+    "failures": 339,
+    "prevalence": 0.0339
   },
-  "latent_failure_modes_count": {
+  "failure_mode_counts": {
     "failure_twf": 46,
     "failure_hdf": 115,
     "failure_pwf": 95,
     "failure_osf": 98,
     "failure_rnf": 19
   },
-  "feature_ranges_raw": {
+  "numeric_ranges": {
     "air_temperature_k": {
       "min": 295.3,
       "max": 304.5,
       "mean": 300.00493,
-      "std": 2.0002586829157516
+      "std": 2.000258682915751
     },
     "process_temperature_k": {
       "min": 305.7,
       "max": 313.8,
-      "mean": 310.00555999999995,
+      "mean": 310.00556,
       "std": 1.4837342191657208
     },
     "rotational_speed_rpm": {
@@ -48,13 +47,13 @@
       "min": 0.0,
       "max": 253.0,
       "mean": 107.951,
-      "std": 63.65414663663636
+      "std": 63.654146636636355
     },
     "machine_failure": {
       "min": 0.0,
       "max": 1.0,
       "mean": 0.0339,
-      "std": 0.18098084265065362
+      "std": 0.18098084265065364
     },
     "failure_twf": {
       "min": 0.0,
@@ -87,17 +86,14 @@
       "std": 0.043549737748530666
     }
   },
-  "leakage_isolation": {
-    "identifier_columns_dropped": [
-      "udi",
-      "product_id"
-    ],
-    "failure_modes_quarantined_for_eval_only": [
-      "failure_twf",
-      "failure_hdf",
-      "failure_pwf",
-      "failure_osf",
-      "failure_rnf"
-    ]
-  }
+  "excluded_from_features": [
+    "udi",
+    "product_id",
+    "machine_failure",
+    "failure_twf",
+    "failure_hdf",
+    "failure_pwf",
+    "failure_osf",
+    "failure_rnf"
+  ]
 }

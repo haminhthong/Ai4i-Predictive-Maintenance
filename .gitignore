@@ -32,6 +32,12 @@ models/*.bin
 artifacts/**/*.joblib
 artifacts/**/*.pkl
 artifacts/**/*.bin
+!artifacts/model.joblib
+
+# Đường dẫn legacy không được runtime mới đọc
+artifacts/champion/
+models/
+releases/
 
 # Dataset tải về; bản CSV hiện tại vẫn được giữ trong Git vì đã track
 data/raw/*.csv

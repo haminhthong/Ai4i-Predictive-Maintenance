@@ -101,16 +101,9 @@ NUMERIC_FEATURES: Final[tuple[str, ...]] = tuple(
 # Giá trị phân loại hợp lệ của quality_type
 VALID_QUALITY_TYPES: Final[frozenset[str]] = frozenset({"L", "M", "H"})
 
-# Các trường metadata được dùng để ghi log, theo dõi và xếp hàng bảo trì.
-# Chúng không được đưa vào MODEL_FEATURE_CONTRACT.
-RUNTIME_METADATA_FIELDS: Final[tuple[str, ...]] = (
-    "event_id",
-    "asset_id",
-    "event_time",
-    "line_id",
-    "sensor_source",
-    "shift",
-)
+# Một mã dòng tùy chọn để nối prediction về bản ghi batch.
+# Trường này không được đưa vào MODEL_FEATURE_CONTRACT.
+RUNTIME_METADATA_FIELDS: Final[tuple[str, ...]] = ("record_id",)
 
 # Tên public của trường phân loại sản phẩm trong API.
 PUBLIC_PRODUCT_TYPE_FIELD: Final[str] = "product_quality_type"

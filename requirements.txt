@@ -1,6 +1,6 @@
 pandas>=2.0.0
 numpy>=1.24.0
-# Release bundle được train bằng scikit-learn 1.7.1; pin để job/serving không lệch pickle.
+# Pin để model joblib được train và serving trên cùng phiên bản scikit-learn.
 scikit-learn==1.7.1
 joblib>=1.2.0
 fastapi>=0.95.0
