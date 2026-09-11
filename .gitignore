@@ -9,10 +9,11 @@ env/
 
 # Cache, coverage và artifact tạm của công cụ kiểm thử
 .pytest_cache/
+.pytest_tmp/
 .ruff_cache/
 .mypy_cache/
 .coverage*
-htmlcov/
+.htmlcov/
 
 # File runtime không thuộc source
 data/runtime/

@@ -12,7 +12,11 @@ import pandas as pd
 
 from .contracts import FAILURE_MODE_COLUMNS, FAILURE_MODE_DESCRIPTIONS
 from .data import load_data
-from .models import compute_calibration_curve_and_ece, compute_classification_metrics
+from .models import (
+    compute_calibration_curve_and_ece,
+    compute_classification_metrics,
+    patch_estimator_compat,
+)
 from .policy import failure_capture_at_k, queue_precision_at_k
 from .utils import LOGGER, save_json, setup_logging
 
@@ -77,7 +81,7 @@ def evaluate_model_on_test() -> dict[str, Any]:
         load_data(return_metadata=True)
     )
     del X_development, X_validation, y_development, y_validation
-    model = joblib.load(ARTIFACTS_DIR / "model.joblib")
+    model = patch_estimator_compat(joblib.load(ARTIFACTS_DIR / "model.joblib"))
     metadata = json.loads((ARTIFACTS_DIR / "metadata.json").read_text(encoding="utf-8"))
     threshold = json.loads((ARTIFACTS_DIR / "threshold.json").read_text(encoding="utf-8"))
     review_threshold = float(threshold["review_threshold"])
