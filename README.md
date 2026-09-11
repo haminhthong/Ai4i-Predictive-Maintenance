@@ -165,6 +165,7 @@ AI4I-Maintenance-Risk-Triage/
 ├── Makefile
 ├── requirements.txt
 ├── requirements-api.txt             # Dependency tối thiểu cho API image
+├── requirements-ci.txt              # Dependency tối thiểu, cố định cho pytest trên CI
 └── .github/workflows/ci.yml
 ```
 
@@ -274,7 +275,7 @@ python -B -m ruff format --check --no-cache src app.py tests scripts
 python -B -m pytest -q
 ```
 
-CI tách thành ba job: Ruff/format, pytest với dependency đầy đủ, và Docker smoke test. Job Docker build image từ source API và artifact đã tồn tại, kiểm tra `/ready`, `/live` và `/score`; Docker không tự tải dữ liệu hoặc tự train trong lúc build.
+CI tách thành ba job: Ruff/format, pytest với dependency API và test tối thiểu đã cố định, và Docker smoke test. Job Docker build image từ source API và artifact đã tồn tại, kiểm tra `/ready`, `/live` và `/score`; Docker không tự tải dữ liệu hoặc tự train trong lúc build.
 
 Build image cục bộ:
 
