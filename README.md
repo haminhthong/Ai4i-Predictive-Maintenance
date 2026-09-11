@@ -169,7 +169,7 @@ AI4I-Maintenance-Risk-Triage/
 └── .github/workflows/ci.yml
 ```
 
-`artifacts/` là source of truth duy nhất cho serving. Split manifest ghi kèm SHA256 của dataset để không tái sử dụng index trên một file dữ liệu khác.
+`artifacts/` là source of truth duy nhất cho serving. Split manifest ghi kèm SHA256 của dataset để không tái sử dụng index trên một file dữ liệu khác. Hash được tính với newline chuẩn LF để cùng một CSV cho kết quả giống nhau trên Windows và Linux.
 
 ## Cài đặt & chạy
 

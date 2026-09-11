@@ -136,6 +136,16 @@ def test_dataset_hash_matches_report() -> None:
         ] == compute_dataset_sha256("data/raw/ai4i2020.csv")
 
 
+def test_dataset_hash_is_stable_across_newline_styles(tmp_path: Path) -> None:
+    content = "column_a,column_b\n1,2\n"
+    lf_path = tmp_path / "lf.csv"
+    crlf_path = tmp_path / "crlf.csv"
+    lf_path.write_bytes(content.encode("utf-8"))
+    crlf_path.write_bytes(content.replace("\n", "\r\n").encode("utf-8"))
+
+    assert compute_dataset_sha256(lf_path) == compute_dataset_sha256(crlf_path)
+
+
 def test_split_manifest_matches_dataset_hash_and_has_no_overlap() -> None:
     import json
 

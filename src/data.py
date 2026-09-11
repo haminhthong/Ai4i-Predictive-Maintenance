@@ -27,15 +27,12 @@ SPLIT_FRACTIONS = {"development": 0.70, "validation": 0.15, "test": 0.15}
 
 
 def compute_dataset_sha256(path: str | Path) -> str:
-    """Tính SHA256 của file CSV để ghi nhận đúng dataset đã dùng."""
+    """Tính SHA256 ổn định giữa Windows và Linux bằng newline chuẩn LF."""
     csv_path = Path(path)
     if not csv_path.exists():
         return "file_not_found"
-    digest = hashlib.sha256()
-    with csv_path.open("rb") as file_obj:
-        for chunk in iter(lambda: file_obj.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    content = csv_path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return hashlib.sha256(content).hexdigest()
 
 
 def load_raw_dataset(path: str | Path = DEFAULT_RAW_DATA_PATH) -> pd.DataFrame:

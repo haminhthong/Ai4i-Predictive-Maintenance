@@ -28,7 +28,7 @@
   ],
   "calibration": "sigmoid_cv3",
   "seed": 42,
-  "data_sha256": "9b01f38d2d2b860f0ad699bac001875eafbfb6b7159ccd2d746808c73c43e77d",
+  "data_sha256": "2f7bdceda6f38332ead2699723569205f20e346fbe3fdae313e3344040d6bf2e",
   "trained_at_utc": "2026-09-10T19:51:54.928785+00:00",
   "scikit_learn": "1.7.1",
   "split": {
