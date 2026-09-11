@@ -1,16 +1,16 @@
 {
   "model": "random_forest",
   "raw_6": {
-    "pr_auc_mean": 0.7316577958097137,
-    "pr_auc_std": 0.07989656195405936,
-    "brier_mean": 0.017092257142857142,
-    "brier_std": 0.0015435053917585632
+    "pr_auc_mean": 0.7342243052373811,
+    "pr_auc_std": 0.07603165051595485,
+    "brier_mean": 0.017066071428571427,
+    "brier_std": 0.0015028946160795227
   },
   "raw_plus_engineered_9": {
-    "pr_auc_mean": 0.8852152737530435,
-    "pr_auc_std": 0.04140326513606017,
-    "brier_mean": 0.009399957142857141,
-    "brier_std": 0.0015322165030585253
+    "pr_auc_mean": 0.8845475213769657,
+    "pr_auc_std": 0.04186558352178759,
+    "brier_mean": 0.009387028571428572,
+    "brier_std": 0.001523791876423109
   },
   "engineered_features": [
     "temperature_delta_k",

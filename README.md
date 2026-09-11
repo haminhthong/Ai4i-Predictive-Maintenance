@@ -1,6 +1,6 @@
 # AI4I Maintenance Risk Triage
 
-[![CI](https://github.com/haminhthong/Ai4i-Predictive-Maintenance/actions/workflows/ci.yml/badge.svg)](https://github.com/haminhthong/Ai4i-Predictive-Maintenance/actions/workflows/ci.yml)
+[![CI](https://github.com/haminhthong/AI4I-Maintenance-Risk-Triage/actions/workflows/ci.yml/badge.svg)](https://github.com/haminhthong/AI4I-Maintenance-Risk-Triage/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![scikit--learn](https://img.shields.io/badge/scikit--learn-1.7.1-F7931E.svg)](https://scikit-learn.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688.svg)](https://fastapi.tiangolo.com/)
@@ -20,8 +20,8 @@ Model được chọn bằng 5-fold Stratified CV trên Development, calibration
 
 | Metric | Result |
 | --- | ---: |
-| PR-AUC | 0.9266 |
-| ROC-AUC | 0.9865 |
+| PR-AUC | 0.9254 |
+| ROC-AUC | 0.9864 |
 | Brier | 0.0051 |
 | ECE | 0.0062 |
 | Precision | 0.9778 |
@@ -82,7 +82,7 @@ flowchart TD
     J --> K[Test hold-out<br/>metric, calibration, slices, Top-K]
     I --> L[artifacts/model.joblib<br/>metadata + threshold + ranges]
     L --> M[POST /score<br/>failure risk + decision + warnings]
-    L --> N[POST /rank<br/>score batch rồi sort risk giảm dần]
+    L --> N[POST /rank<br/>vectorized batch score rồi sort risk giảm dần]
     M --> O[Streamlit Single Snapshot]
     N --> P[Streamlit Batch Ranking]
 ```
@@ -103,12 +103,14 @@ flowchart TD
 
 Engineered features luôn được tính lại từ raw sensors. Client không thể gửi một giá trị derived khác với công thức train.
 
+Các feature này dựa trên quan hệ vật lý từ raw sensor và phù hợp với cấu trúc synthetic của AI4I. Vì vậy mức cải thiện trên benchmark không nên được diễn giải là bằng chứng mô hình sẽ đạt mức tương tự trên dữ liệu nhà máy thực.
+
 ### Feature ablation
 
 | Feature set | PR-AUC CV mean ± std | Brier CV mean ± std |
 | --- | ---: | ---: |
-| Raw 6 | 0.7317 ± 0.0799 | 0.0171 ± 0.0015 |
-| Raw 6 + engineered 3 | 0.8852 ± 0.0414 | 0.0094 ± 0.0015 |
+| Raw 6 | 0.7342 ± 0.0760 | 0.0171 ± 0.0015 |
+| Raw 6 + engineered 3 | 0.8845 ± 0.0419 | 0.0094 ± 0.0015 |
 
 Kết quả này là lý do giữ 3 engineered features, thay vì thêm nhiều biến biến đổi không có căn cứ domain.
 
@@ -122,7 +124,7 @@ Kết quả này là lý do giữ 3 engineered features, thay vì thêm nhiều 
 | Rows | 10,000 |
 | Failure prevalence | 3.39% |
 | Temporal ordering | Unavailable |
-| Split | Stratified random: 70% / 15% / 15% |
+| Split | Stratified random: 70% / 15% / 15%, gắn với SHA256 dataset |
 | Claim | i.i.d. snapshot generalization trong benchmark distribution |
 
 `TWF`, `HDF`, `PWF`, `OSF`, `RNF` có quan hệ hậu nghiệm với target nên chỉ được dùng để phân tích failure-mode trên Test, không đi vào model.
@@ -130,7 +132,7 @@ Kết quả này là lý do giữ 3 engineered features, thay vì thêm nhiều 
 ## Cấu trúc thư mục
 
 ```text
-Predictive-Maintenance-Ai4i/
+AI4I-Maintenance-Risk-Triage/
 ├── app.py                         # Streamlit: single snapshot + batch ranking
 ├── artifacts/
 │   ├── model.joblib               # Model pipeline đã calibration
@@ -140,7 +142,7 @@ Predictive-Maintenance-Ai4i/
 ├── data/raw/ai4i2020.csv          # Dataset AI4I được dùng trong CI
 ├── reports/
 │   ├── data_audit.json             # Data validation và leakage boundary
-│   ├── split_manifest.json          # Chỉ số split tái lập
+│   ├── split_manifest.json          # Chỉ số split + SHA256 dataset
 │   ├── validation_metrics.json     # CV leaderboard, ablation, threshold
 │   ├── feature_ablation.json       # Raw 6 so với raw + engineered 3
 │   ├── final_test_metrics.json     # Test metrics, calibration, Top-K
@@ -159,13 +161,14 @@ Predictive-Maintenance-Ai4i/
 │   └── api.py                      # FastAPI endpoints
 ├── tests/                          # Unit, data-contract và API smoke tests
 ├── scripts/download_data.py        # Tải dataset từ UCI khi cần
-├── Dockerfile                      # Image chỉ phục vụ artifact đã train
+├── Dockerfile                      # Image API phục vụ artifact đã train
 ├── Makefile
 ├── requirements.txt
+├── requirements-api.txt             # Dependency tối thiểu cho API image
 └── .github/workflows/ci.yml
 ```
 
-`artifacts/` là source of truth duy nhất cho serving. Pipeline mới không đọc release bundle, SHA manifest, champion mirror, SQLite event store, PSI monitor hoặc technician feedback database. Các thư mục legacy tương ứng nếu còn trong checkout chỉ là dữ liệu lịch sử và không được dùng khi train, evaluate, serve hay build image.
+`artifacts/` là source of truth duy nhất cho serving. Split manifest ghi kèm SHA256 của dataset để không tái sử dụng index trên một file dữ liệu khác.
 
 ## Cài đặt & chạy
 
@@ -216,9 +219,11 @@ Sau bước train, artifact phục vụ gồm `artifacts/model.joblib`, `metadat
 python -m uvicorn src.api:app --reload --port 8000
 ```
 
-Kiểm tra:
+Kiểm tra tiến trình và model readiness:
 
 ```bash
+curl http://127.0.0.1:8000/live
+curl http://127.0.0.1:8000/ready
 curl http://127.0.0.1:8000/health
 ```
 
@@ -251,7 +256,7 @@ Response tối giản:
 }
 ```
 
-Ranking batch dùng `POST /rank` với body `{ "snapshots": [...], "top_k": 20 }`. API score từng dòng, sort theo calibrated risk và trả `rank`; không lưu event và không dựng queue theo asset.
+Ranking batch dùng `POST /rank` với body `{ "snapshots": [...], "top_k": 20 }`. API chuẩn hóa cả batch, gọi model một lần bằng `predict_proba`, sau đó sort theo calibrated risk và trả `rank`; không lưu event và không dựng queue theo asset.
 
 ### Chạy dashboard
 
@@ -269,7 +274,14 @@ python -B -m ruff format --check --no-cache src app.py tests scripts
 python -B -m pytest -q
 ```
 
-CI thực hiện đúng ba bước trên, kiểm tra dataset tracked và pin scikit-learn 1.7.1. Docker chỉ build image từ source API và artifact đã tồn tại; Docker không tự tải dữ liệu hoặc tự train trong lúc build.
+CI tách thành ba job: Ruff/format, pytest với dependency đầy đủ, và Docker smoke test. Job Docker build image từ source API và artifact đã tồn tại, kiểm tra `/ready`, `/live` và `/score`; Docker không tự tải dữ liệu hoặc tự train trong lúc build.
+
+Build image cục bộ:
+
+```bash
+docker build -t ai4i-risk-triage:local .
+docker run --rm -p 8000:8000 ai4i-risk-triage:local
+```
 
 ## Giới hạn
 

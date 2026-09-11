@@ -29,14 +29,13 @@ from .contracts import CATEGORICAL_FEATURES, MODEL_FEATURE_CONTRACT, NUMERIC_FEA
 def build_preprocessor(
     numeric_features: Sequence[str] = NUMERIC_FEATURES,
     categorical_features: Sequence[str] = CATEGORICAL_FEATURES,
+    scale_numeric: bool = False,
 ) -> ColumnTransformer:
-    """Tạo tiền xử lý chung cho dữ liệu số và `quality_type`."""
-    numeric_transformer = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", StandardScaler()),
-        ]
-    )
+    """Tạo tiền xử lý cho dữ liệu số và `quality_type`."""
+    numeric_steps = [("imputer", SimpleImputer(strategy="median"))]
+    if scale_numeric:
+        numeric_steps.append(("scaler", StandardScaler()))
+    numeric_transformer = Pipeline(steps=numeric_steps)
     categorical_transformer = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="most_frequent")),
@@ -55,11 +54,19 @@ def build_pipeline(
     classifier: Any,
     numeric_features: Sequence[str] = NUMERIC_FEATURES,
     categorical_features: Sequence[str] = CATEGORICAL_FEATURES,
+    scale_numeric: bool = False,
 ) -> Pipeline:
     """Ghép tiền xử lý và classifier thành một pipeline."""
     return Pipeline(
         steps=[
-            ("preprocessor", build_preprocessor(numeric_features, categorical_features)),
+            (
+                "preprocessor",
+                build_preprocessor(
+                    numeric_features,
+                    categorical_features,
+                    scale_numeric=scale_numeric,
+                ),
+            ),
             ("classifier", classifier),
         ]
     )
@@ -78,6 +85,7 @@ def get_candidate_models(
             LogisticRegression(max_iter=1000, class_weight="balanced", random_state=seed),
             numeric_features,
             categorical_features,
+            scale_numeric=True,
         ),
         "random_forest": build_pipeline(
             RandomForestClassifier(
@@ -88,11 +96,13 @@ def get_candidate_models(
             ),
             numeric_features,
             categorical_features,
+            scale_numeric=False,
         ),
         "hist_gradient_boosting": build_pipeline(
             HistGradientBoostingClassifier(class_weight="balanced", random_state=seed),
             numeric_features,
             categorical_features,
+            scale_numeric=False,
         ),
     }
 

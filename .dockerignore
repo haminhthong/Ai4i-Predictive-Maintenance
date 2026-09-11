@@ -26,9 +26,7 @@ data/raw
 data/runtime
 models
 releases
-artifacts/champion
 
 .env
 .env.*
-!.env.example
 *.log

@@ -86,6 +86,28 @@ def _service_or_503() -> RiskInferenceService:
     return service
 
 
+@app.get("/live", tags=["System"])
+def live() -> dict[str, str]:
+    """Xác nhận tiến trình API còn hoạt động."""
+    return {"status": "ok"}
+
+
+@app.get("/ready", response_model=HealthResponse, tags=["System"])
+def ready() -> dict[str, Any]:
+    """Xác nhận artifact model đã sẵn sàng để phục vụ."""
+    service = RiskInferenceService.get_instance()
+    if not service.is_ready:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Artifact model chưa sẵn sàng. Hãy chạy `python -m src.train`.",
+        )
+    return {
+        "status": "ok",
+        "model_ready": True,
+        "model": service.metadata.get("model"),
+    }
+
+
 @app.get("/health", response_model=HealthResponse, tags=["System"])
 def health() -> dict[str, Any]:
     """Kiểm tra API và artifact model."""

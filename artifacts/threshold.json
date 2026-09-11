@@ -1,5 +1,5 @@
 {
-  "review_threshold": 0.5894524145866132,
+  "review_threshold": 0.5929280293546418,
   "selection_metric": "validation_f1",
   "validation_f1": 0.8666666666666667
 }

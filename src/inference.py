@@ -84,7 +84,7 @@ class RiskInferenceService:
                 MODEL_FEATURE_CONTRACT
             )
             self.artifact_checks["threshold_valid"] = (
-                isinstance(threshold_value, (int, float)) and 0 <= threshold_value <= 1
+                isinstance(threshold_value, int | float) and 0 <= threshold_value <= 1
             )
             self.artifact_checks["ready"] = bool(
                 self.model is not None
@@ -126,10 +126,44 @@ class RiskInferenceService:
     def rank(
         self, raw_payloads: list[dict[str, Any]], top_k: int | None = None
     ) -> list[dict[str, Any]]:
-        """Chấm điểm toàn bộ batch rồi sắp xếp giảm dần theo risk đã hiệu chỉnh."""
-        scored = []
+        """Chấm điểm cả batch bằng một lần gọi `predict_proba`."""
+        if not self.is_ready or self.model is None:
+            raise RuntimeError("Artifact mô hình chưa sẵn sàng.")
+        if not raw_payloads:
+            return []
+
+        rows = []
         for index, payload in enumerate(raw_payloads):
             row = dict(payload)
             row.setdefault("record_id", f"row_{index}")
-            scored.append(self.predict(row))
+            rows.append(row)
+
+        raw_df = pd.DataFrame(rows)
+        record_ids = raw_df["record_id"].tolist()
+        model_input = raw_df.drop(columns=["record_id"], errors="ignore")
+        canonical_df = canonicalize_raw_dataframe(model_input)
+
+        forbidden = set(IDENTIFIER_COLUMNS) | {TARGET_COLUMN} | set(FAILURE_MODE_COLUMNS)
+        leaked_columns = sorted(forbidden & set(canonical_df.columns))
+        if leaked_columns:
+            raise ValueError(f"Payload chứa cột không được phép: {leaked_columns}")
+
+        features = build_canonical_features(canonical_df, expected_features=MODEL_FEATURE_CONTRACT)
+        probabilities = self.model.predict_proba(features)[:, 1]
+        review_threshold = float(self.threshold["review_threshold"])
+        model_name = self.metadata.get("model", "unknown")
+
+        scored = []
+        for index, probability in enumerate(probabilities):
+            risk_value = float(probability)
+            scored.append(
+                {
+                    "record_id": record_ids[index],
+                    "failure_risk": round(risk_value, 6),
+                    "decision": decision_from_risk(risk_value, review_threshold),
+                    "threshold": review_threshold,
+                    "warnings": check_input_ranges(features.iloc[[index]], self.reference_ranges),
+                    "model": model_name,
+                }
+            )
         return rank_rows(scored, top_k=top_k)

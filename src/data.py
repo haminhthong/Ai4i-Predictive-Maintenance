@@ -101,8 +101,13 @@ def audit_dataset(
     return report
 
 
-def _is_valid_split_manifest(manifest: dict[str, Any], total_rows: int, seed: int) -> bool:
-    """Đảm bảo split bao phủ đủ dòng, không trùng và đúng tỷ lệ."""
+def _is_valid_split_manifest(
+    manifest: dict[str, Any],
+    total_rows: int,
+    seed: int,
+    dataset_sha256: str,
+) -> bool:
+    """Đảm bảo split thuộc đúng dataset, không trùng và bao phủ đủ dòng."""
     groups = [
         manifest.get("development_indices", []),
         manifest.get("validation_indices", []),
@@ -116,6 +121,7 @@ def _is_valid_split_manifest(manifest: dict[str, Any], total_rows: int, seed: in
     }
     return (
         manifest.get("seed") == seed
+        and manifest.get("dataset_sha256") == dataset_sha256
         and manifest.get("split_fractions") == SPLIT_FRACTIONS
         and manifest.get("split_counts") == expected_counts
         and len(flattened) == total_rows
@@ -128,13 +134,15 @@ def create_or_load_split_manifest(
     df: pd.DataFrame,
     seed: int = 42,
     manifest_path: str | Path = DEFAULT_SPLIT_MANIFEST_PATH,
+    dataset_path: str | Path = DEFAULT_RAW_DATA_PATH,
 ) -> dict[str, Any]:
     """Tạo hoặc đọc split Development 70%, Validation 15%, Test 15%."""
     path = Path(manifest_path)
+    dataset_sha256 = compute_dataset_sha256(dataset_path)
     if path.exists():
         try:
             manifest = json.loads(path.read_text(encoding="utf-8"))
-            if _is_valid_split_manifest(manifest, len(df), seed):
+            if _is_valid_split_manifest(manifest, len(df), seed, dataset_sha256):
                 return manifest
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             LOGGER.warning("Split manifest hiện tại không hợp lệ; sẽ tạo lại.")
@@ -155,6 +163,7 @@ def create_or_load_split_manifest(
         random_state=seed,
     )
     manifest = {
+        "dataset_sha256": dataset_sha256,
         "seed": seed,
         "split_fractions": SPLIT_FRACTIONS,
         "split_counts": {
@@ -204,7 +213,12 @@ def load_data(
     failure_modes = [column for column in FAILURE_MODE_COLUMNS if column in clean_df.columns]
     modes = clean_df[failure_modes].copy() if failure_modes else pd.DataFrame(index=clean_df.index)
     features = build_canonical_features(clean_df, expected_features=MODEL_FEATURE_CONTRACT)
-    manifest = create_or_load_split_manifest(raw_df, seed=seed, manifest_path=manifest_path)
+    manifest = create_or_load_split_manifest(
+        raw_df,
+        seed=seed,
+        manifest_path=manifest_path,
+        dataset_path=path,
+    )
 
     development_indices = manifest["development_indices"]
     validation_indices = manifest["validation_indices"]

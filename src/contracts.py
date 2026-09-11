@@ -18,8 +18,6 @@ RAW_TO_CANONICAL_COLUMN_MAP: Final[dict[str, str]] = {
     "Product ID": "product_id",
     "Type": "quality_type",
     "product_quality_type": "quality_type",
-    "product_type": "quality_type",
-    "machine_type": "quality_type",
     "Air temperature [K]": "air_temperature_k",
     "Air temperature": "air_temperature_k",
     "Process temperature [K]": "process_temperature_k",

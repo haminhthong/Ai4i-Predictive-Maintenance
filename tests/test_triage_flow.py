@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from src.inference import RiskInferenceService
 from src.policy import (
     decision_from_risk,
     failure_capture_at_k,
@@ -39,6 +40,44 @@ def test_rank_rows_returns_top_k() -> None:
     ranked = rank_rows(rows, top_k=2)
     assert [row["record_id"] for row in ranked] == ["b", "c"]
     assert [row["rank"] for row in ranked] == [1, 2]
+
+
+def test_batch_rank_preserves_record_ids_and_uses_one_model_call(monkeypatch) -> None:
+    service = RiskInferenceService.get_instance()
+    rows = [
+        {
+            "record_id": "machine_a",
+            "product_quality_type": "M",
+            "air_temperature_k": 300.0,
+            "process_temperature_k": 310.0,
+            "rotational_speed_rpm": 1500.0,
+            "torque_nm": 40.0,
+            "tool_wear_min": 50.0,
+        },
+        {
+            "record_id": "machine_b",
+            "product_quality_type": "M",
+            "air_temperature_k": 300.0,
+            "process_temperature_k": 312.0,
+            "rotational_speed_rpm": 1200.0,
+            "torque_nm": 65.0,
+            "tool_wear_min": 220.0,
+        },
+    ]
+    original_predict_proba = service.model.predict_proba
+    calls = 0
+
+    def counted_predict_proba(features):
+        nonlocal calls
+        calls += 1
+        return original_predict_proba(features)
+
+    monkeypatch.setattr(service.model, "predict_proba", counted_predict_proba)
+    result = service.rank(rows, top_k=2)
+
+    assert calls == 1
+    assert {row["record_id"] for row in result} == {"machine_a", "machine_b"}
+    assert result[0]["failure_risk"] >= result[1]["failure_risk"]
 
 
 def test_top_k_business_metrics_rank_by_risk() -> None:

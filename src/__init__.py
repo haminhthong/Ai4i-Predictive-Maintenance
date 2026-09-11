@@ -10,7 +10,7 @@ Các module trong package:
 - `train`: Đánh giá chéo, chọn mô hình, hiệu chỉnh và lưu artifact.
 - `evaluate`: Đánh giá Test hold-out và phân tích cơ chế hỏng.
 - `inference`: Chấm điểm snapshot và xếp hạng batch từ artifact duy nhất.
-- `api`: FastAPI với `/health`, `/score` và `/rank`.
+- `api`: FastAPI với `/live`, `/ready`, `/health`, `/score` và `/rank`.
 - `utils`: Tiện ích ghi log, cố định seed và ghi JSON.
 """
 

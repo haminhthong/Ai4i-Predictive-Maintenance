@@ -14,7 +14,7 @@ env/
 .coverage*
 htmlcov/
 
-# File runtime không thuộc source hoặc release bundle
+# File runtime không thuộc source
 data/runtime/
 *.sqlite3
 
@@ -25,19 +25,11 @@ dist/
 .idea/
 .vscode/
 
-# Model nhị phân sinh trong quá trình train; release JSON vẫn được commit
-models/*.joblib
-models/*.pkl
-models/*.bin
+# Model nhị phân sinh trong quá trình train; chỉ artifact active ở thư mục gốc được giữ.
 artifacts/**/*.joblib
 artifacts/**/*.pkl
 artifacts/**/*.bin
 !artifacts/model.joblib
-
-# Đường dẫn legacy không được runtime mới đọc
-artifacts/champion/
-models/
-releases/
 
 # Dataset tải về; bản CSV hiện tại vẫn được giữ trong Git vì đã track
 data/raw/*.csv

@@ -44,6 +44,15 @@ def test_health_reports_loaded_artifact() -> None:
     assert response.json()["model_ready"] is True
 
 
+def test_live_and_ready_endpoints() -> None:
+    live_response = client.get("/live")
+    ready_response = client.get("/ready")
+    assert live_response.status_code == 200
+    assert live_response.json() == {"status": "ok"}
+    assert ready_response.status_code == 200
+    assert ready_response.json()["model_ready"] is True
+
+
 def test_score_returns_small_canonical_response() -> None:
     response = client.post("/score", json=sample_payload("row_1"))
     assert response.status_code == 200
@@ -107,7 +116,7 @@ def test_engineered_features_are_recomputed_from_raw_sensors() -> None:
 
 def test_conflicting_quality_aliases_are_rejected() -> None:
     with pytest.raises(ValueError, match="mâu thuẫn"):
-        canonicalize_raw_dataframe(pd.DataFrame({"Type": ["L"], "machine_type": ["H"]}))
+        canonicalize_raw_dataframe(pd.DataFrame({"Type": ["L"], "product_quality_type": ["H"]}))
 
 
 def test_failure_modes_are_not_model_features() -> None:
@@ -125,6 +134,20 @@ def test_dataset_hash_matches_report() -> None:
         assert json.loads(report.read_text(encoding="utf-8"))[
             "raw_sha256"
         ] == compute_dataset_sha256("data/raw/ai4i2020.csv")
+
+
+def test_split_manifest_matches_dataset_hash_and_has_no_overlap() -> None:
+    import json
+
+    manifest = json.loads(Path("reports/split_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["dataset_sha256"] == compute_dataset_sha256("data/raw/ai4i2020.csv")
+
+    development = set(manifest["development_indices"])
+    validation = set(manifest["validation_indices"])
+    test = set(manifest["test_indices"])
+    assert not development & validation
+    assert not development & test
+    assert not validation & test
 
 
 def test_metrics_have_expected_shape() -> None:
